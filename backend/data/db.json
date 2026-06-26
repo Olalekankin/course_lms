@@ -1,0 +1,15 @@
+{
+  "users": [
+    {
+      "id": "usr_dev9jl514",
+      "name": "Test Student",
+      "email": "student_1782472778392@example.com",
+      "passwordHash": "$2a$10$tspYxgPs1uk3z1HRO/x9bOouy7g5M4DaQsGn2Wev2mpmP8fFNrNr.",
+      "completedLessons": [
+        "lesson_1_1"
+      ],
+      "currentUnlockedLesson": "lesson_1_2",
+      "createdAt": "2026-06-26T11:19:38.912Z"
+    }
+  ]
+}
