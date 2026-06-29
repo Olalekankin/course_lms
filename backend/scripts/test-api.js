@@ -116,13 +116,23 @@ async function runTests() {
   // Test 5: Fetch Unlocked Lesson 1.1 Details
   console.log('\nTest 5: Fetch Lesson 1.1 Details...');
   const lessonDetailsRes = await request('GET', `/api/courses/lessons/${lesson1.id}`, null, token);
-  console.log(`Status: ${lessonDetailsRes.status}, Content Length: ${lessonDetailsRes.body.content ? lessonDetailsRes.body.content.length : 0}, Questions: ${lessonDetailsRes.body.questions.length}`);
+  console.log(`Status: ${lessonDetailsRes.status}, Content Length: ${lessonDetailsRes.body.content ? lessonDetailsRes.body.content.length : 0}`);
   if (lessonDetailsRes.status !== 200 || !lessonDetailsRes.body.content) {
     throw new Error('Failed to fetch unlocked lesson content!');
   }
-  // Verify correctAnswers field is stripped for security
-  if ('correctAnswers' in lessonDetailsRes.body.questions[0]) {
+
+  console.log('Fetching Lesson 1.1 Questions...');
+  const lessonQuestionsRes = await request('GET', `/api/courses/lessons/${lesson1.id}/questions`, null, token);
+  console.log(`Status: ${lessonQuestionsRes.status}, Questions count: ${lessonQuestionsRes.body.questions ? lessonQuestionsRes.body.questions.length : 0}`);
+  if (lessonQuestionsRes.status !== 200 || !lessonQuestionsRes.body.questions) {
+    throw new Error('Failed to fetch unlocked lesson questions!');
+  }
+  // Verify correctAnswers and explanation fields are stripped for security
+  if ('correctAnswers' in lessonQuestionsRes.body.questions[0]) {
     throw new Error('Security violation: correctAnswers leaked in API details response!');
+  }
+  if ('explanation' in lessonQuestionsRes.body.questions[0]) {
+    throw new Error('Security violation: explanation leaked in API details response!');
   }
 
   // Test 6: Attempt to Fetch Locked Lesson 1.2 Details

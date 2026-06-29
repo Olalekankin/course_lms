@@ -1,214 +1,462 @@
-const { readDb, writeDb } = require('../utils/dbHelper');
-const courseData = require('../data/courseData.json');
+const Course   = require('../models/Course');
+const Module   = require('../models/Module');
+const Lesson   = require('../models/Lesson');
+const Question = require('../models/Question');
+const Answer   = require('../models/Answer');
+const User     = require('../models/User');
 
-// Get course modules and lessons index with user lock status
-async function getCourses(req, res) {
+// ─── Helper: derive moduleStatus for a given module ───────────────────────
+function getModuleStatus(mod, user, allModules, courseId) {
+  const completedSet = new Set(user.completedLessons || []);
+  const startedArr   = (user.startedModules && user.startedModules.get
+    ? user.startedModules.get(courseId)
+    : user.startedModules?.[courseId]) || [];
+  const started = new Set(startedArr);
+
+  // Completed — every lesson in the module is done
+  const allDone = mod.lessonIds.length > 0 && mod.lessonIds.every(id => completedSet.has(id));
+  if (allDone) return 'completed';
+
+  // Started (in-progress)
+  if (started.has(mod.moduleId)) return 'in-progress';
+
+  // Module 1 is always unlocked-not-started if not yet started/completed
+  if (mod.order === 1) return 'unlocked-not-started';
+
+  // Check if previous module is 100% complete
+  const prevMod = allModules.find(m => m.order === mod.order - 1);
+  if (!prevMod) return 'locked';
+  const prevDone = prevMod.lessonIds.length > 0 && prevMod.lessonIds.every(id => completedSet.has(id));
+  return prevDone ? 'unlocked-not-started' : 'locked';
+}
+
+// ─── Helper: count completed lessons in a module ───────────────────────────
+function countCompleted(mod, user) {
+  const completedSet = new Set(user.completedLessons || []);
+  return mod.lessonIds.filter(id => completedSet.has(id)).length;
+}
+
+// ─── Endpoint 1: GET /api/courses ─────────────────────────────────────────
+async function getCoursesList(req, res) {
   try {
-    const db = await readDb();
-    const user = db.users.find(u => u.id === req.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    const user = await User.findOne({ userId: req.userId });
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
-    const { lessons, ...courseInfo } = courseData;
-    
-    // Process progression status for each lesson
-    const mappedLessons = lessons.map((lesson, idx) => {
-      const isCompleted = user.completedLessons.includes(lesson.id);
-      
-      // Unlocked rules:
-      // 1. First lesson is always unlocked (idx === 0)
-      // 2. Matches user.currentUnlockedLesson
-      // 3. Already completed
-      // 4. Previous lesson is completed (failsafe)
-      const isUnlocked = 
-        idx === 0 || 
-        lesson.id === user.currentUnlockedLesson || 
-        isCompleted ||
-        (idx > 0 && user.completedLessons.includes(lessons[idx - 1].id));
+    const courses = await Course.find({});
+    const result = await Promise.all(courses.map(async course => {
+      const completedCount = (user.completedLessons || []).filter(lessonId => {
+        // We count per-course by checking lesson docs — use cached lessonIds from modules
+        return true; // computed below
+      }).length;
+
+      // Count lessons belonging to this course that the user completed
+      const modules = await Module.find({ courseId: course.courseId });
+      const allLessonIds = modules.flatMap(m => m.lessonIds);
+      const completed = (user.completedLessons || []).filter(id => allLessonIds.includes(id)).length;
+      const pct = allLessonIds.length > 0 ? Math.round((completed / allLessonIds.length) * 100) : 0;
 
       return {
-        id: lesson.id,
-        moduleId: lesson.moduleId,
-        number: lesson.number,
-        title: lesson.title,
-        objective: lesson.objective,
-        difficulty: lesson.difficulty,
-        frequency: lesson.frequency,
-        thumbnailUrl: lesson.thumbnailUrl,
+        courseId:     course.courseId,
+        title:        course.title,
+        description:  course.description,
+        totalModules: course.totalModules,
+        totalLessons: course.totalLessons,
+        userProgress: {
+          completedLessons: completed,
+          percentComplete:  pct,
+        },
+      };
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('[courseController] getCoursesList:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+// ─── Endpoint 2: GET /api/courses/:courseId ────────────────────────────────
+async function getCourseOverview(req, res) {
+  try {
+    const { courseId } = req.params;
+    const user   = await User.findOne({ userId: req.userId });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const course = await Course.findOne({ courseId });
+    if (!course) return res.status(404).json({ message: 'Course not found' });
+
+    const allModules = await Module.find({ courseId }).sort({ order: 1 });
+    const allLessonIds = allModules.flatMap(m => m.lessonIds);
+    const completed = (user.completedLessons || []).filter(id => allLessonIds.includes(id)).length;
+    const pct = allLessonIds.length > 0 ? Math.round((completed / allLessonIds.length) * 100) : 0;
+
+    // Build syllabus — fetch lesson titles for each module
+    const syllabus = await Promise.all(allModules.map(async mod => {
+      const lessons = await Lesson.find({ moduleId: mod.moduleId, courseId }).sort({ orderInModule: 1 });
+      const moduleStatus = getModuleStatus(mod, user, allModules, courseId);
+
+      return {
+        moduleId:               mod.moduleId,
+        order:                  mod.order,
+        name:                   mod.name,
+        description:            mod.description,
+        lessonCount:            mod.lessonIds.length,
+        lessonTitles:           lessons.map(l => l.title),
+        moduleStatus,
+        completedLessonsInModule: countCompleted(mod, user),
+      };
+    }));
+
+    res.json({
+      courseId:     course.courseId,
+      title:        course.title,
+      description:  course.description,
+      totalModules: course.totalModules,
+      totalLessons: course.totalLessons,
+      userProgress: { completedLessons: completed, percentComplete: pct },
+      syllabus,
+    });
+  } catch (err) {
+    console.error('[courseController] getCourseOverview:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+// ─── Endpoint 3: GET /api/courses/:courseId/modules/:moduleId ─────────────
+async function getModuleDetail(req, res) {
+  try {
+    const { courseId, moduleId } = req.params;
+    const user = await User.findOne({ userId: req.userId });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const allModules = await Module.find({ courseId }).sort({ order: 1 });
+    const mod = allModules.find(m => m.moduleId === moduleId);
+    if (!mod) return res.status(404).json({ message: 'Module not found' });
+
+    const moduleStatus = getModuleStatus(mod, user, allModules, courseId);
+    if (moduleStatus === 'locked') {
+      return res.status(403).json({ message: 'This module is locked. Complete the previous module first.' });
+    }
+
+    const lessons = await Lesson.find({ moduleId, courseId }).sort({ orderInModule: 1 });
+    const completedSet = new Set(user.completedLessons || []);
+
+    // Determine which lesson is "next" (first not completed, in order)
+    let foundNext = false;
+    const lessonList = lessons.map(l => {
+      const isCompleted = completedSet.has(l.lessonId);
+      let isNext = false;
+      if (!isCompleted && !foundNext) {
+        isNext = true;
+        foundNext = true;
+      }
+      return {
+        lessonId:    l.lessonId,
+        number:      l.number,
+        title:       l.title,
+        objective:   l.objective,
+        difficulty:  l.difficulty,
+        frequency:   l.frequency,
+        thumbnailUrl: l.thumbnailUrl,
         isCompleted,
-        isUnlocked
+        isNext,
       };
     });
 
     res.json({
-      ...courseInfo,
-      lessons: mappedLessons
+      moduleId,
+      courseId,
+      order:        mod.order,
+      name:         mod.name,
+      description:  mod.description,
+      moduleStatus,
+      lessons:      lessonList,
     });
-  } catch (error) {
-    console.error('[Course Controller] getCourses error:', error);
+  } catch (err) {
+    console.error('[courseController] getModuleDetail:', err);
     res.status(500).json({ message: 'Internal server error' });
   }
 }
 
-// Get specific lesson content and quiz questions (with answers stripped for security)
-async function getLessonDetails(req, res) {
+// ─── Endpoint 4: POST /api/courses/:courseId/modules/:moduleId/start ──────
+async function startModule(req, res) {
   try {
-    const { id } = req.params;
-    const db = await readDb();
-    const user = db.users.find(u => u.id === req.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+    const { courseId, moduleId } = req.params;
+    const user = await User.findOne({ userId: req.userId });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const allModules = await Module.find({ courseId }).sort({ order: 1 });
+    const mod = allModules.find(m => m.moduleId === moduleId);
+    if (!mod) return res.status(404).json({ message: 'Module not found' });
+
+    // Module 1 can always be started; others require previous module 100% done
+    if (mod.order > 1) {
+      const prevMod = allModules.find(m => m.order === mod.order - 1);
+      if (prevMod) {
+        const completedSet = new Set(user.completedLessons || []);
+        const prevDone = prevMod.lessonIds.every(id => completedSet.has(id));
+        if (!prevDone) {
+          return res.status(403).json({ message: 'Complete all lessons in the previous module first.' });
+        }
+      }
     }
 
-    const lessons = courseData.lessons;
-    const lessonIdx = lessons.findIndex(l => l.id === id);
-    if (lessonIdx === -1) {
-      return res.status(404).json({ message: 'Lesson not found' });
+    // Already started — just return current module detail
+    const startedArr = (user.startedModules && user.startedModules.get
+      ? user.startedModules.get(courseId)
+      : user.startedModules?.[courseId]) || [];
+
+    if (!startedArr.includes(moduleId)) {
+      // Record start
+      if (!user.startedModules) user.startedModules = {};
+      const currentStarted = (user.startedModules.get
+        ? user.startedModules.get(courseId)
+        : user.startedModules[courseId]) || [];
+
+      if (user.startedModules.set) {
+        user.startedModules.set(courseId, [...currentStarted, moduleId]);
+      } else {
+        user.startedModules[courseId] = [...currentStarted, moduleId];
+      }
+      user.markModified('startedModules');
+      await user.save();
     }
 
-    const lesson = lessons[lessonIdx];
-    
-    // Check if the lesson is actually unlocked
-    const isCompleted = user.completedLessons.includes(lesson.id);
-    const isUnlocked = 
-      lessonIdx === 0 || 
-      lesson.id === user.currentUnlockedLesson || 
-      isCompleted ||
-      (lessonIdx > 0 && user.completedLessons.includes(lessons[lessonIdx - 1].id));
-
-    if (!isUnlocked) {
-      return res.status(403).json({ message: 'This lesson is locked. Complete the previous challenges first.' });
-    }
-
-    // Strip answers from questions before sending to frontend
-    const secureQuestions = lesson.questions.map(q => {
-      const { correctAnswers, ...qData } = q;
-      return qData;
+    // Return module detail (same as getModuleDetail response)
+    const updatedUser = await User.findOne({ userId: req.userId });
+    const lessons = await Lesson.find({ moduleId, courseId }).sort({ orderInModule: 1 });
+    const completedSet = new Set(updatedUser.completedLessons || []);
+    let foundNext = false;
+    const lessonList = lessons.map(l => {
+      const isCompleted = completedSet.has(l.lessonId);
+      let isNext = false;
+      if (!isCompleted && !foundNext) { isNext = true; foundNext = true; }
+      return {
+        lessonId: l.lessonId, number: l.number, title: l.title,
+        objective: l.objective, difficulty: l.difficulty, frequency: l.frequency,
+        thumbnailUrl: l.thumbnailUrl, isCompleted, isNext,
+      };
     });
 
     res.json({
-      id: lesson.id,
-      moduleId: lesson.moduleId,
-      number: lesson.number,
-      title: lesson.title,
-      objective: lesson.objective,
-      difficulty: lesson.difficulty,
-      frequency: lesson.frequency,
-      thumbnailUrl: lesson.thumbnailUrl,
-      content: lesson.content,
-      questions: secureQuestions
+      moduleId, courseId, order: mod.order, name: mod.name,
+      description: mod.description, moduleStatus: 'in-progress', lessons: lessonList,
     });
-  } catch (error) {
-    console.error('[Course Controller] getLessonDetails error:', error);
+  } catch (err) {
+    console.error('[courseController] startModule:', err);
     res.status(500).json({ message: 'Internal server error' });
   }
 }
 
-// Grade quiz answers and unlock the next lesson if all answers are correct
+// ─── Endpoint 5: GET /api/courses/lessons/:lessonId ───────────────────────
+async function getLessonDetail(req, res) {
+  try {
+    const { lessonId } = req.params;
+    const user = await User.findOne({ userId: req.userId });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const lesson = await Lesson.findOne({ lessonId });
+    if (!lesson) return res.status(404).json({ message: 'Lesson not found' });
+
+    // Check that the module has been started
+    const startedArr = (user.startedModules && user.startedModules.get
+      ? user.startedModules.get(lesson.courseId)
+      : user.startedModules?.[lesson.courseId]) || [];
+    const moduleStarted = startedArr.includes(lesson.moduleId);
+
+    // Module 1 is auto-accessible even without explicit "start" for backward compat
+    const mod = await Module.findOne({ moduleId: lesson.moduleId, courseId: lesson.courseId });
+    if (!moduleStarted && mod && mod.order > 1) {
+      return res.status(403).json({ message: 'Start this module before accessing its lessons.' });
+    }
+
+    res.json({
+      lessonId:    lesson.lessonId,
+      moduleId:    lesson.moduleId,
+      courseId:    lesson.courseId,
+      number:      lesson.number,
+      title:       lesson.title,
+      objective:   lesson.objective,
+      difficulty:  lesson.difficulty,
+      frequency:   lesson.frequency,
+      thumbnailUrl: lesson.thumbnailUrl,
+      content:     lesson.content,
+    });
+  } catch (err) {
+    console.error('[courseController] getLessonDetail:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+// ─── Endpoint 6: GET /api/courses/lessons/:lessonId/questions ─────────────
+async function getLessonQuestions(req, res) {
+  try {
+    const { lessonId } = req.params;
+    const user = await User.findOne({ userId: req.userId });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const lesson = await Lesson.findOne({ lessonId });
+    if (!lesson) return res.status(404).json({ message: 'Lesson not found' });
+
+    const questions = await Question.find({ lessonId }).sort({ order: 1 });
+
+    res.json({
+      lessonId,
+      questions: questions.map(q => ({
+        questionId:   q.questionId,
+        order:        q.order,
+        type:         q.type,
+        questionText: q.questionText,
+        options:      q.options,
+      })),
+    });
+  } catch (err) {
+    console.error('[courseController] getLessonQuestions:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+// ─── Endpoint 7: POST /api/courses/lessons/:lessonId/submit ───────────────
 async function submitQuiz(req, res) {
   try {
-    const { id } = req.params;
-    const { answers } = req.body; // Object: { [questionId]: answerValue }
+    const { lessonId } = req.params;
+    const { answers } = req.body;
 
-    if (!answers) {
-      return res.status(400).json({ message: 'Answers are required' });
+    if (!answers) return res.status(400).json({ message: 'Answers are required' });
+
+    const user = await User.findOne({ userId: req.userId });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const lesson = await Lesson.findOne({ lessonId });
+    if (!lesson) return res.status(404).json({ message: 'Lesson not found' });
+
+    const mod = await Module.findOne({ moduleId: lesson.moduleId, courseId: lesson.courseId });
+    if (!mod) return res.status(404).json({ message: 'Module not found' });
+
+    const completedSet = new Set(user.completedLessons || []);
+
+    // ── Enforce strict lesson order ───────────────────────────────────────
+    if (lesson.orderInModule > 1) {
+      const prevLessonId = mod.lessonIds[lesson.orderInModule - 2]; // 0-indexed
+      if (prevLessonId && !completedSet.has(prevLessonId)) {
+        return res.status(403).json({ message: 'Complete the previous lesson first.' });
+      }
     }
 
-    const db = await readDb();
-    const userIndex = db.users.findIndex(u => u.id === req.userId);
-    if (userIndex === -1) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    const user = db.users[userIndex];
-
-    const lessons = courseData.lessons;
-    const lessonIdx = lessons.findIndex(l => l.id === id);
-    if (lessonIdx === -1) {
-      return res.status(404).json({ message: 'Lesson not found' });
-    }
-
-    const lesson = lessons[lessonIdx];
-    const questions = lesson.questions;
+    // ── Grade answers ─────────────────────────────────────────────────────
+    const questions = await Question.find({ lessonId }).sort({ order: 1 });
+    const answerDocs = await Answer.find({ lessonId });
+    const answerMap  = Object.fromEntries(answerDocs.map(a => [a.questionId, a]));
 
     let allCorrect = true;
-    const gradingResults = {};
+    const results = {};
 
     for (const q of questions) {
-      const userAnswer = answers[q.id];
+      const ans = answerMap[q.questionId];
+      if (!ans) continue;
+
+      const userAnswer = answers[q.questionId];
       let isCorrect = false;
 
       if (q.type === 'single-choice') {
-        // userAnswer is a number (option index)
-        isCorrect = Number(userAnswer) === q.correctAnswers[0];
+        isCorrect = Number(userAnswer) === ans.correctAnswers[0];
       } else if (q.type === 'multi-choice') {
-        // userAnswer is an array of indices
         if (Array.isArray(userAnswer)) {
-          const sortedUser = [...userAnswer].map(Number).sort();
-          const sortedCorrect = [...q.correctAnswers].sort();
-          isCorrect = 
-            sortedUser.length === sortedCorrect.length && 
-            sortedUser.every((val, index) => val === sortedCorrect[index]);
+          const sortedUser    = [...userAnswer].map(Number).sort();
+          const sortedCorrect = [...ans.correctAnswers].sort();
+          isCorrect = sortedUser.length === sortedCorrect.length &&
+            sortedUser.every((v, i) => v === sortedCorrect[i]);
         }
       } else if (q.type === 'short-answer') {
-        // userAnswer is a string
         if (typeof userAnswer === 'string') {
-          const userStr = userAnswer.trim().toLowerCase();
-          isCorrect = q.correctAnswers.some(ans => ans.trim().toLowerCase() === userStr);
+          const norm = userAnswer.trim().toLowerCase();
+          isCorrect = ans.correctAnswers.some(a => a.trim().toLowerCase() === norm);
         }
       }
 
-      if (!isCorrect) {
-        allCorrect = false;
-      }
+      if (!isCorrect) allCorrect = false;
 
-      gradingResults[q.id] = {
-        correct: isCorrect,
-        explanation: q.explanation,
-        correctAnswers: q.correctAnswers // Return answers so frontend can show correction
+      results[q.questionId] = {
+        correct:        isCorrect,
+        correctAnswers: ans.correctAnswers,
+        explanation:    ans.explanation,
       };
     }
 
+    // ── Update user progress on pass ──────────────────────────────────────
+    let nextLessonId         = null;
+    let isModuleComplete     = false;
+    let nextModuleUnlockable = false;
+
     if (allCorrect) {
-      // Mark current lesson completed
-      if (!user.completedLessons.includes(lesson.id)) {
-        user.completedLessons.push(lesson.id);
+      if (!completedSet.has(lessonId)) {
+        user.completedLessons.push(lessonId);
+        completedSet.add(lessonId);
       }
 
-      // Determine next lesson
-      let nextLessonId = null;
-      if (lessonIdx + 1 < lessons.length) {
-        const nextLesson = lessons[lessonIdx + 1];
-        nextLessonId = nextLesson.id;
-        user.currentUnlockedLesson = nextLesson.id;
-      } else {
-        user.currentUnlockedLesson = 'completed';
+      // Determine next lesson within module
+      const currentIdx = mod.lessonIds.indexOf(lessonId);
+      if (currentIdx >= 0 && currentIdx + 1 < mod.lessonIds.length) {
+        nextLessonId = mod.lessonIds[currentIdx + 1];
       }
 
-      db.users[userIndex] = user;
-      await writeDb(db);
+      // Check if this was the last lesson in the module
+      isModuleComplete = mod.lessonIds.every(id => completedSet.has(id));
 
-      res.json({
-        passed: true,
-        message: 'Congratulations! You passed the Interview Challenge!',
-        results: gradingResults,
-        nextLessonId
-      });
-    } else {
-      res.json({
-        passed: false,
-        message: 'Some answers are incorrect. Review the explanations and try again.',
-        results: gradingResults
-      });
+      // Check if next module exists and is now unlockable
+      if (isModuleComplete) {
+        const allModules = await Module.find({ courseId: lesson.courseId }).sort({ order: 1 });
+        const nextMod    = allModules.find(m => m.order === mod.order + 1);
+        nextModuleUnlockable = !!nextMod;
+      }
+
+      // Keep currentUnlockedLessons in sync for backward compat
+      if (nextLessonId) {
+        if (user.currentUnlockedLessons.set) {
+          user.currentUnlockedLessons.set(lesson.courseId, nextLessonId);
+        } else {
+          user.currentUnlockedLessons[lesson.courseId] = nextLessonId;
+        }
+        user.markModified('currentUnlockedLessons');
+      }
+
+      user.markModified('completedLessons');
+      await user.save();
     }
-  } catch (error) {
-    console.error('[Course Controller] submitQuiz error:', error);
+
+    const currentUnlockedLessonsObj = {};
+    if (user.currentUnlockedLessons && user.currentUnlockedLessons.forEach) {
+      user.currentUnlockedLessons.forEach((v, k) => { currentUnlockedLessonsObj[k] = v; });
+    } else {
+      Object.assign(currentUnlockedLessonsObj, user.currentUnlockedLessons || {});
+    }
+
+    res.json({
+      passed:               allCorrect,
+      message:              allCorrect
+        ? 'Congratulations! You passed the Interview Challenge!'
+        : 'Some answers are incorrect. Review the explanations and try again.',
+      nextLessonId,
+      isModuleComplete,
+      nextModuleUnlockable,
+      results,
+      userProgress: {
+        completedLessons:         user.completedLessons,
+        currentUnlockedLessons:   currentUnlockedLessonsObj,
+      },
+    });
+  } catch (err) {
+    console.error('[courseController] submitQuiz:', err);
     res.status(500).json({ message: 'Internal server error' });
   }
 }
 
 module.exports = {
-  getCourses,
-  getLessonDetails,
-  submitQuiz
+  getCoursesList,
+  getCourseOverview,
+  getModuleDetail,
+  startModule,
+  getLessonDetail,
+  getLessonQuestions,
+  submitQuiz,
 };

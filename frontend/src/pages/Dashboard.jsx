@@ -1,106 +1,92 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, CheckCircle, Lock, PlayCircle, ChevronDown, ChevronUp, LogOut } from 'lucide-react';
-import { fetchCourseStart, fetchCourseSuccess, fetchCourseFailure } from '../store/courseSlice';
+import { BookOpen, Code2, Server, LogOut, ChevronRight, CheckCircle2, Layers } from 'lucide-react';
+import { fetchStart, fetchCoursesSuccess, fetchFailure } from '../store/courseSlice';
 import { logout } from '../store/authSlice';
 import { apiRequest } from '../utils/api';
 
-export default function Dashboard() {
-  const dispatch = useDispatch();
-  const navigate = useNavigate();
-  const { user } = useSelector((state) => state.auth);
-  const { courseInfo, lessons, loading, error } = useSelector((state) => state.course);
+const COURSE_META = {
+  'frontend-interview-mastery-course': {
+    icon: Code2,
+    gradient: 'from-violet-500 to-indigo-600',
+    glow: 'shadow-violet-200',
+    badge: 'Frontend',
+    badgeColor: 'bg-violet-100 text-violet-700',
+    ring: 'ring-violet-200',
+  },
+  'backend-interview-mastery-course': {
+    icon: Server,
+    gradient: 'from-emerald-500 to-teal-600',
+    glow: 'shadow-emerald-200',
+    badge: 'Backend',
+    badgeColor: 'bg-emerald-100 text-emerald-700',
+    ring: 'ring-emerald-200',
+  },
+};
 
-  // Accordion state: keep track of which module is expanded (e.g. "1", "2")
-  const [expandedModules, setExpandedModules] = useState({});
+export default function Dashboard() {
+  const dispatch  = useDispatch();
+  const navigate  = useNavigate();
+  const { user }  = useSelector(s => s.auth);
+  const { courses, loading, error } = useSelector(s => s.course);
 
   useEffect(() => {
-    const fetchCourse = async () => {
-      dispatch(fetchCourseStart());
+    const load = async () => {
+      dispatch(fetchStart());
       try {
         const data = await apiRequest('/courses');
-        // The API returns the whole structure including modules and a flat list of parsed lessons
-        dispatch(fetchCourseSuccess(data));
-        
-        // Auto-expand the first module by default if available
-        if (data.modules && data.modules.length > 0) {
-          setExpandedModules({ [data.modules[0].id]: true });
-        }
+        dispatch(fetchCoursesSuccess(data));
       } catch (err) {
-        dispatch(fetchCourseFailure(err.message || 'Failed to load course'));
+        dispatch(fetchFailure(err.message || 'Failed to load courses'));
       }
     };
-
-    fetchCourse();
+    load();
   }, [dispatch]);
-
-  const toggleModule = (moduleId) => {
-    setExpandedModules(prev => ({
-      ...prev,
-      [moduleId]: !prev[moduleId]
-    }));
-  };
 
   const handleLogout = () => {
     dispatch(logout());
     navigate('/login');
   };
 
-  const handleLessonClick = (lesson) => {
-    if (lesson.isUnlocked || lesson.isCompleted) {
-      navigate(`/lesson/${lesson.id}`);
-    }
+  const handleOpenCourse = (courseId) => {
+    navigate(`/course/${courseId}`);
   };
 
-  if (loading && !courseInfo) {
+  // ── Loading ──────────────────────────────────────────────────────────────
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-light-50">
-        <div className="w-12 h-12 border-4 border-accent-indigo/20 border-t-accent-indigo rounded-full animate-spin"></div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-accent-indigo/20 border-t-accent-indigo rounded-full animate-spin" />
+          <p className="text-sm text-light-400 font-medium animate-pulse">Loading courses…</p>
+        </div>
       </div>
     );
   }
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-light-50 text-light-700 p-6">
-        <p className="text-accent-rose mb-4 font-medium">{error}</p>
-        <button onClick={() => window.location.reload()} className="px-4 py-2 bg-white rounded-lg shadow border border-light-200">
-          Try Again
-        </button>
-      </div>
-    );
-  }
-
-  if (!courseInfo) return null;
-
-  // Calculate overall progress
-  const totalLessons = lessons.length;
-  const completedCount = user?.completedLessons?.length || 0;
-  const progressPercentage = totalLessons > 0 ? Math.round((completedCount / totalLessons) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-light-50 font-sans pb-16">
-      {/* Header */}
+    <div className="min-h-screen bg-light-50 font-sans pb-16 animate-fadeIn">
+      {/* ── Header ── */}
       <header className="bg-white border-b border-light-200 sticky top-0 z-30 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-primary flex items-center justify-center shadow-md">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md">
               <BookOpen className="h-5 w-5 text-white" />
             </div>
             <div>
               <h1 className="font-bold text-light-900 tracking-tight leading-tight">Interview Mastery</h1>
-              <p className="text-xs text-light-500 font-medium">Frontend Edition</p>
+              <p className="text-xs text-light-500 font-medium">Your Learning Hub</p>
             </div>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4">
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-sm font-semibold text-light-900">Hello, {user?.name}</span>
-              <span className="text-xs text-accent-indigo font-medium">{progressPercentage}% Completed</span>
+              <span className="text-xs text-light-400 font-medium">Choose your course</span>
             </div>
-            <button 
+            <button
               onClick={handleLogout}
-              className="p-2 text-light-500 hover:text-accent-rose hover:bg-light-100 rounded-lg transition-colors"
+              className="p-2 text-light-500 hover:text-red-500 hover:bg-light-100 rounded-lg transition-colors"
               title="Logout"
             >
               <LogOut className="h-5 w-5" />
@@ -109,116 +95,116 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mt-10">
-        
-        {/* Course Hero & Progress */}
-        <div className="bg-white rounded-2xl border border-light-200 p-8 mb-10 shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-accent-indigo/5 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2"></div>
-          
-          <div className="relative z-10">
-            <h2 className="text-2xl font-bold text-light-900 mb-2">{courseInfo.title}</h2>
-            <p className="text-light-500 max-w-2xl mb-8 leading-relaxed">
-              {courseInfo.description}
-            </p>
-            
-            <div>
-              <div className="flex justify-between items-end mb-2">
-                <span className="text-sm font-semibold text-light-700">Course Progress</span>
-                <span className="text-sm font-bold text-accent-indigo">{completedCount} / {totalLessons} Lessons</span>
-              </div>
-              <div className="h-3 w-full bg-light-100 rounded-full overflow-hidden shadow-inner">
-                <div 
-                  className="h-full bg-gradient-primary transition-all duration-1000 ease-out"
-                  style={{ width: `${progressPercentage}%` }}
-                ></div>
-              </div>
-            </div>
-          </div>
+      {/* ── Main ── */}
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mt-12">
+
+        {/* Hero text */}
+        <div className="mb-10 text-center">
+          <h2 className="text-3xl font-extrabold text-light-900 mb-3 tracking-tight">
+            Which course are you tackling?
+          </h2>
+          <p className="text-light-500 max-w-lg mx-auto leading-relaxed">
+            Pick a course below to view the full curriculum, track your progress, and continue where you left off.
+          </p>
         </div>
 
-        {/* Modules Accordion */}
-        <div className="space-y-6">
-          {courseInfo.modules.map((module, index) => {
-            const isExpanded = expandedModules[module.id];
-            const moduleLessons = lessons.filter(l => l.moduleId === module.id);
-            const moduleCompleted = moduleLessons.filter(l => l.isCompleted).length;
-            
+        {/* Error */}
+        {error && (
+          <div className="mb-8 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm font-medium">
+            {error}
+          </div>
+        )}
+
+        {/* Course Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {courses.map(course => {
+            const meta = COURSE_META[course.courseId] || {
+              icon: Layers,
+              gradient: 'from-gray-500 to-gray-700',
+              glow: 'shadow-gray-200',
+              badge: 'Course',
+              badgeColor: 'bg-gray-100 text-gray-700',
+              ring: 'ring-gray-200',
+            };
+            const Icon = meta.icon;
+            const pct  = course.userProgress?.percentComplete ?? 0;
+            const done = course.userProgress?.completedLessons ?? 0;
+            const hasStarted = done > 0;
+
             return (
-              <div key={module.id} className="bg-white rounded-2xl border border-light-200 overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md">
-                
-                {/* Accordion Header */}
-                <button 
-                  onClick={() => toggleModule(module.id)}
-                  className="w-full px-6 py-5 flex items-center justify-between bg-white hover:bg-light-50 transition-colors text-left"
-                >
-                  <div className="flex-1 pr-4">
-                    <div className="flex items-center gap-3 mb-1">
-                      <span className="text-xs font-bold text-accent-violet tracking-wider uppercase">Module {index + 1}</span>
-                      <span className="text-xs font-semibold text-light-500 bg-light-100 px-2.5 py-0.5 rounded-full">
-                        {moduleCompleted}/{moduleLessons.length} done
-                      </span>
-                    </div>
-                    <h3 className="text-lg font-bold text-light-900">{module.name}</h3>
+              <div
+                key={course.courseId}
+                onClick={() => handleOpenCourse(course.courseId)}
+                className={`
+                  group relative bg-white rounded-2xl border border-light-200 p-7 flex flex-col
+                  cursor-pointer shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300
+                  ring-2 ring-transparent hover:${meta.ring}
+                `}
+              >
+                {/* Top glow blob */}
+                <div className={`absolute -top-6 -right-6 w-32 h-32 rounded-full bg-gradient-to-br ${meta.gradient} opacity-10 blur-2xl pointer-events-none`} />
+
+                {/* Icon + Badge */}
+                <div className="flex items-start justify-between mb-6">
+                  <div className={`h-14 w-14 rounded-2xl bg-gradient-to-br ${meta.gradient} flex items-center justify-center shadow-lg`}>
+                    <Icon className="h-7 w-7 text-white" />
                   </div>
-                  <div className="shrink-0 h-10 w-10 flex items-center justify-center rounded-full bg-light-100 text-light-500">
-                    {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                  <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${meta.badgeColor}`}>
+                    {meta.badge}
+                  </span>
+                </div>
+
+                {/* Title & Description */}
+                <h3 className="text-xl font-extrabold text-light-900 mb-2 leading-snug group-hover:text-indigo-700 transition-colors">
+                  {course.title}
+                </h3>
+                <p className="text-sm text-light-500 leading-relaxed mb-6 flex-1">
+                  {course.description}
+                </p>
+
+                {/* Stats row */}
+                <div className="flex gap-4 mb-5 text-xs font-semibold text-light-500">
+                  <span className="flex items-center gap-1.5">
+                    <Layers className="h-3.5 w-3.5" />
+                    {course.totalModules} Modules
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <BookOpen className="h-3.5 w-3.5" />
+                    {course.totalLessons} Lessons
+                  </span>
+                  {hasStarted && (
+                    <span className="flex items-center gap-1.5 text-emerald-600">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {done} Completed
+                    </span>
+                  )}
+                </div>
+
+                {/* Progress bar */}
+                <div className="mb-5">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-xs font-semibold text-light-600">Progress</span>
+                    <span className="text-xs font-bold text-light-800">{pct}%</span>
                   </div>
-                </button>
-
-                {/* Accordion Body */}
-                <div 
-                  className={`border-t border-light-100 transition-all duration-300 ease-in-out ${isExpanded ? 'opacity-100 max-h-[2000px]' : 'opacity-0 max-h-0 overflow-hidden'}`}
-                >
-                  <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 bg-light-50/50">
-                    {moduleLessons.map((lesson) => {
-                      const isLocked = !lesson.isUnlocked && !lesson.isCompleted;
-                      const statusColor = lesson.isCompleted 
-                        ? 'bg-accent-emerald text-white' 
-                        : (lesson.isUnlocked ? 'bg-accent-indigo text-white' : 'bg-light-200 text-light-500');
-
-                      return (
-                        <div 
-                          key={lesson.id}
-                          onClick={() => handleLessonClick(lesson)}
-                          className={`
-                            relative p-5 rounded-xl border flex flex-col h-full bg-white transition-all duration-200
-                            ${isLocked ? 'border-light-200 opacity-75 cursor-not-allowed grayscale-[20%]' : 'border-light-200 hover:border-accent-violet/30 hover:shadow-lg hover:shadow-accent-violet/5 hover:-translate-y-1 cursor-pointer hover-lift'}
-                          `}
-                        >
-                          {/* Locked Overlay for interaction block (visual only) */}
-                          {isLocked && (
-                            <div className="absolute inset-0 bg-white/40 backdrop-blur-[1px] rounded-xl z-10 flex items-center justify-center pointer-events-none">
-                              <div className="bg-white/90 p-3 rounded-full shadow-sm">
-                                <Lock className="h-5 w-5 text-light-400" />
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="flex items-start justify-between mb-3 relative z-20">
-                            <span className="text-xs font-bold text-light-500 tracking-wider">Lesson {lesson.number}</span>
-                            <div className={`h-6 w-6 rounded-full flex items-center justify-center shadow-sm ${statusColor}`}>
-                              {lesson.isCompleted ? (
-                                <CheckCircle className="h-3.5 w-3.5" />
-                              ) : (
-                                isLocked ? <Lock className="h-3 w-3" /> : <PlayCircle className="h-3.5 w-3.5" />
-                              )}
-                            </div>
-                          </div>
-                          
-                          <h4 className="text-md font-bold text-light-900 mb-2 relative z-20 leading-tight">
-                            {lesson.title}
-                          </h4>
-                          
-                          <p className="text-sm text-light-500 line-clamp-2 mt-auto relative z-20">
-                            {lesson.objective}
-                          </p>
-                        </div>
-                      );
-                    })}
+                  <div className="h-2 w-full bg-light-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full bg-gradient-to-r ${meta.gradient} transition-all duration-700 ease-out rounded-full`}
+                      style={{ width: `${pct}%` }}
+                    />
                   </div>
                 </div>
-                
+
+                {/* CTA Button */}
+                <button
+                  className={`
+                    w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2
+                    bg-gradient-to-r ${meta.gradient} text-white shadow-md
+                    hover:opacity-90 active:scale-[0.98] transition-all duration-200
+                  `}
+                >
+                  {hasStarted ? 'Continue Learning' : 'Start Learning'}
+                  <ChevronRight className="h-4 w-4" />
+                </button>
               </div>
             );
           })}
