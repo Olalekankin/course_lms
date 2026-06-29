@@ -13,6 +13,236 @@ import {
 } from '../store/courseSlice';
 import { updateProgress } from '../store/authSlice';
 import { apiRequest } from '../utils/api';
+// ── QuizPanel extracted to module scope so React never remounts it on parent re-render ──
+// (Defining a component inside a render function causes remount on every parent state change,
+//  which drops focus from inputs on every keystroke.)
+function QuizPanel({
+  questions,
+  answers,
+  validationError,
+  quizResult,
+  loading,
+  activeLesson,
+  onOptionChange,
+  onTextChange,
+  onSubmit,
+  onRetake,
+}) {
+  return (
+    <div className="p-6 sm:p-10 lg:p-12">
+
+      <div className="mb-8">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-light-200 shadow-sm mb-4">
+          <PlayCircle className="h-4 w-4 text-accent-indigo" />
+          <span className="text-xs font-bold text-light-900 tracking-wide">INTERVIEW CHALLENGE</span>
+        </div>
+        <h2 className="text-2xl font-bold text-light-900 mb-2">Test your knowledge</h2>
+        <p className="text-light-500 text-sm">
+          {quizResult
+            ? quizResult.passed
+              ? 'Great work! Review below or continue to the next lesson.'
+              : 'Review the explanations — you can retake or move forward.'
+            : 'Answer all questions and submit to unlock the next lesson.'}
+        </p>
+      </div>
+
+      <form onSubmit={onSubmit} className="space-y-8">
+
+        {validationError && (
+          <div className="bg-accent-rose/5 border border-accent-rose/20 rounded-xl p-4 flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-accent-rose shrink-0 mt-0.5" />
+            <span className="text-sm text-accent-rose font-medium">{validationError}</span>
+          </div>
+        )}
+
+        {questions?.map((q, index) => (
+          <div key={q.questionId || q.id} className="bg-white rounded-2xl border border-light-200 p-6 shadow-sm hover:shadow-md transition-shadow">
+            <h3 className="text-base font-semibold text-light-900 mb-4 flex gap-3">
+              <span className="text-accent-indigo">{index + 1}.</span>
+              <span>{q.questionText}</span>
+            </h3>
+
+            {q.codeBlock && (
+              <div className="rounded-xl overflow-hidden shadow-sm mb-6 border border-light-200">
+                <SyntaxHighlighter
+                  language="javascript"
+                  style={oneLight}
+                  PreTag="div"
+                  customStyle={{ margin: 0, padding: '1.25rem', background: '#f8fafc', fontSize: '0.9rem' }}
+                >
+                  {q.codeBlock}
+                </SyntaxHighlighter>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {q.type === 'single-choice' && q.options?.map((opt, i) => {
+                const qKey = q.questionId || q.id;
+                return (
+                  <label key={i} className="flex items-start gap-3 p-3 rounded-xl border border-light-200 hover:bg-light-50 cursor-pointer transition-colors group">
+                    <div className="relative flex items-center justify-center shrink-0 mt-0.5">
+                      <input
+                        type="radio"
+                        name={qKey}
+                        className="peer sr-only"
+                        checked={answers[qKey] === i}
+                        onChange={() => onOptionChange(qKey, i, false)}
+                        disabled={!!quizResult}
+                      />
+                      <div className="h-5 w-5 rounded-full border-2 border-light-300 peer-checked:border-accent-indigo peer-checked:bg-accent-indigo transition-colors flex items-center justify-center">
+                        <div className="h-2 w-2 rounded-full bg-white scale-0 peer-checked:scale-100 transition-transform"></div>
+                      </div>
+                    </div>
+                    <span className="text-sm text-light-700 font-medium group-hover:text-light-900 transition-colors">{opt}</span>
+                  </label>
+                );
+              })}
+
+              {q.type === 'multi-choice' && q.options?.map((opt, i) => {
+                const qKey = q.questionId || q.id;
+                return (
+                  <label key={i} className="flex items-start gap-3 p-3 rounded-xl border border-light-200 hover:bg-light-50 cursor-pointer transition-colors group">
+                    <div className="relative flex items-center justify-center shrink-0 mt-0.5">
+                      <input
+                        type="checkbox"
+                        className="peer sr-only"
+                        checked={(answers[qKey] || []).includes(i)}
+                        onChange={() => onOptionChange(qKey, i, true)}
+                        disabled={!!quizResult}
+                      />
+                      <div className="h-5 w-5 rounded-md border-2 border-light-300 peer-checked:border-accent-indigo peer-checked:bg-accent-indigo transition-colors flex items-center justify-center">
+                        <svg className="w-3 h-3 text-white scale-0 peer-checked:scale-100 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    </div>
+                    <span className="text-sm text-light-700 font-medium group-hover:text-light-900 transition-colors">{opt}</span>
+                  </label>
+                );
+              })}
+
+              {q.type === 'short-answer' && (() => {
+                const qKey = q.questionId || q.id;
+                return (
+                  <input
+                    key={qKey}
+                    type="text"
+                    className="w-full px-4 py-3 rounded-xl border border-light-200 bg-light-50 text-light-900 text-sm font-medium focus:outline-none focus:border-accent-indigo focus:ring-2 focus:ring-accent-indigo/20 transition-all"
+                    placeholder="Type your answer here..."
+                    value={answers[qKey] || ''}
+                    onChange={(e) => onTextChange(qKey, e.target.value)}
+                    disabled={!!quizResult}
+                  />
+                );
+              })()}
+            </div>
+
+            {/* Per-question feedback */}
+            {quizResult && quizResult.results && quizResult.results[q.questionId || q.id] && (
+              <div className={`mt-4 p-4 rounded-xl border ${quizResult.results[q.questionId || q.id].correct ? 'bg-accent-emerald/5 border-accent-emerald/20' : 'bg-accent-rose/5 border-accent-rose/20'}`}>
+                <div className="flex items-start gap-2">
+                  {quizResult.results[q.questionId || q.id].correct
+                    ? <CheckCircle2 className="h-5 w-5 text-accent-emerald shrink-0 mt-0.5" />
+                    : <XCircle className="h-5 w-5 text-accent-rose shrink-0 mt-0.5" />}
+                  <div>
+                    <p className={`text-sm font-bold mb-1 ${quizResult.results[q.questionId || q.id].correct ? 'text-accent-emerald' : 'text-accent-rose'}`}>
+                      {quizResult.results[q.questionId || q.id].correct ? 'Correct!' : 'Incorrect'}
+                    </p>
+                    <div className="text-sm text-light-700 mb-2">
+                      <span className="font-semibold block mb-1">Correct Answer:</span>
+                      <div className="font-medium bg-white px-3 py-2 rounded-lg border border-light-200 inline-block">
+                        {q.type === 'short-answer'
+                          ? quizResult.results[q.questionId || q.id].correctAnswers.join(' / ')
+                          : quizResult.results[q.questionId || q.id].correctAnswers.map(idx => q.options[idx]).join(', ')}
+                      </div>
+                    </div>
+                    <div className="text-sm text-light-700">
+                      <span className="font-semibold block mb-1">Explanation:</span>
+                      <div className="prose prose-sm prose-slate">
+                        <ReactMarkdown>{quizResult.results[q.questionId || q.id].explanation || ''}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* ── Submit / Result ── */}
+        {!quizResult ? (
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-4 rounded-xl text-white font-bold text-sm bg-gradient-primary hover:opacity-95 shadow-md shadow-accent-violet/20 hover:shadow-lg hover:shadow-accent-violet/25 transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {loading
+              ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              : 'Submit Challenge'}
+          </button>
+        ) : (
+          <div className={`bg-white rounded-2xl border p-6 text-center shadow-lg ${quizResult.passed ? 'border-accent-emerald/30 shadow-accent-emerald/5' : 'border-amber-200 shadow-amber-50'}`}>
+            <div className={`mx-auto h-12 w-12 rounded-full flex items-center justify-center mb-4 ${quizResult.passed ? 'bg-accent-emerald/10' : 'bg-amber-50'}`}>
+              {quizResult.passed
+                ? <CheckCircle2 className="h-6 w-6 text-accent-emerald" />
+                : <AlertCircle className="h-6 w-6 text-amber-500" />}
+            </div>
+
+            <h3 className="text-lg font-bold text-light-900 mb-1">
+              {quizResult.passed ? '🎉 Challenge Passed!' : 'Challenge Completed'}
+            </h3>
+
+            <p className="text-2xl font-black text-accent-indigo mb-1">
+              {Object.values(quizResult.results).filter(r => r.correct).length} / {questions?.length}
+            </p>
+
+            <p className={`text-sm mb-6 ${quizResult.passed ? 'text-light-500' : 'text-amber-600 font-medium'}`}>
+              {quizResult.passed
+                ? "Great work! You've mastered this lesson."
+                : 'You can review the explanations above, then retake or move forward.'}
+            </p>
+
+            <div className="flex flex-col gap-3">
+              {quizResult.nextLessonId ? (
+                <Link
+                  to={`/lesson/${quizResult.nextLessonId}`}
+                  className={`w-full inline-flex py-3.5 px-4 rounded-xl text-white font-semibold text-sm transition-all items-center justify-center gap-2 ${
+                    quizResult.passed
+                      ? 'bg-accent-emerald hover:bg-emerald-600 shadow-md shadow-accent-emerald/20'
+                      : 'bg-accent-indigo hover:bg-indigo-600 shadow-md shadow-accent-indigo/20'
+                  }`}
+                >
+                  {quizResult.passed ? 'Continue to Next Lesson' : 'Move to Next Lesson'}
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              ) : (
+                <Link
+                  to={activeLesson?.moduleId && activeLesson?.courseId
+                    ? `/course/${activeLesson.courseId}/module/${activeLesson.moduleId}`
+                    : '/'}
+                  className="w-full inline-flex py-3.5 px-4 rounded-xl text-white font-semibold text-sm bg-accent-emerald hover:bg-emerald-600 shadow-md shadow-accent-emerald/20 transition-all items-center justify-center gap-2"
+                >
+                  {quizResult.passed ? '🏆 Module Complete!' : 'Back to Module'}
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              )}
+
+              <button
+                type="button"
+                onClick={onRetake}
+                className="w-full inline-flex py-3 px-4 rounded-xl font-semibold text-sm border border-light-200 text-light-700 hover:bg-light-50 hover:border-light-300 transition-all items-center justify-center gap-2"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Retake Test
+              </button>
+            </div>
+          </div>
+        )}
+
+      </form>
+    </div>
+  );
+}
 
 export default function LessonViewer() {
   const { id } = useParams();
@@ -29,6 +259,7 @@ export default function LessonViewer() {
   const [questionsLoading, setQuestionsLoading] = useState(false);
   // Mobile tab: 'lesson' | 'challenge'
   const [activeTab, setActiveTab] = useState('lesson');
+
 
   useEffect(() => {
     const fetchLessonDetails = async () => {
@@ -157,224 +388,6 @@ export default function LessonViewer() {
   }
 
   if (!activeLesson) return null;
-
-  // â”€â”€ Shared quiz panel (used in both mobile tab and desktop sidebar) â”€â”€â”€â”€â”€â”€â”€
-  const QuizPanel = () => (
-    <div className="p-6 sm:p-10 lg:p-12">
-
-      <div className="mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-light-200 shadow-sm mb-4">
-          <PlayCircle className="h-4 w-4 text-accent-indigo" />
-          <span className="text-xs font-bold text-light-900 tracking-wide">INTERVIEW CHALLENGE</span>
-        </div>
-        <h2 className="text-2xl font-bold text-light-900 mb-2">Test your knowledge</h2>
-        <p className="text-light-500 text-sm">
-          {quizResult
-            ? quizResult.passed
-              ? 'Great work! Review below or continue to the next lesson.'
-              : "Review the explanations â€” you can retake or move forward."
-            : 'Answer all questions and submit to unlock the next lesson.'}
-        </p>
-      </div>
-
-      <form onSubmit={handleQuizSubmit} className="space-y-8">
-
-        {validationError && (
-          <div className="bg-accent-rose/5 border border-accent-rose/20 rounded-xl p-4 flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-accent-rose shrink-0 mt-0.5" />
-            <span className="text-sm text-accent-rose font-medium">{validationError}</span>
-          </div>
-        )}
-
-        {questions?.map((q, index) => (
-          <div key={q.questionId || q.id} className="bg-white rounded-2xl border border-light-200 p-6 shadow-sm hover:shadow-md transition-shadow">
-            <h3 className="text-base font-semibold text-light-900 mb-4 flex gap-3">
-              <span className="text-accent-indigo">{index + 1}.</span>
-              <span>{q.questionText}</span>
-            </h3>
-
-            {q.codeBlock && (
-              <div className="rounded-xl overflow-hidden shadow-sm mb-6 border border-light-200">
-                <SyntaxHighlighter
-                  language="javascript"
-                  style={oneLight}
-                  PreTag="div"
-                  customStyle={{ margin: 0, padding: '1.25rem', background: '#f8fafc', fontSize: '0.9rem' }}
-                >
-                  {q.codeBlock}
-                </SyntaxHighlighter>
-              </div>
-            )}
-
-            <div className="space-y-3">
-              {q.type === 'single-choice' && q.options?.map((opt, i) => {
-                const qKey = q.questionId || q.id;
-                return (
-                  <label key={i} className="flex items-start gap-3 p-3 rounded-xl border border-light-200 hover:bg-light-50 cursor-pointer transition-colors group">
-                    <div className="relative flex items-center justify-center shrink-0 mt-0.5">
-                      <input
-                        type="radio"
-                        name={qKey}
-                        className="peer sr-only"
-                        checked={answers[qKey] === i}
-                        onChange={() => handleOptionChange(qKey, i, false)}
-                        disabled={!!quizResult}
-                      />
-                      <div className="h-5 w-5 rounded-full border-2 border-light-300 peer-checked:border-accent-indigo peer-checked:bg-accent-indigo transition-colors flex items-center justify-center">
-                        <div className="h-2 w-2 rounded-full bg-white scale-0 peer-checked:scale-100 transition-transform"></div>
-                      </div>
-                    </div>
-                    <span className="text-sm text-light-700 font-medium group-hover:text-light-900 transition-colors">{opt}</span>
-                  </label>
-                );
-              })}
-
-              {q.type === 'multi-choice' && q.options?.map((opt, i) => {
-                const qKey = q.questionId || q.id;
-                return (
-                  <label key={i} className="flex items-start gap-3 p-3 rounded-xl border border-light-200 hover:bg-light-50 cursor-pointer transition-colors group">
-                    <div className="relative flex items-center justify-center shrink-0 mt-0.5">
-                      <input
-                        type="checkbox"
-                        className="peer sr-only"
-                        checked={(answers[qKey] || []).includes(i)}
-                        onChange={() => handleOptionChange(qKey, i, true)}
-                        disabled={!!quizResult}
-                      />
-                      <div className="h-5 w-5 rounded-md border-2 border-light-300 peer-checked:border-accent-indigo peer-checked:bg-accent-indigo transition-colors flex items-center justify-center">
-                        <svg className="w-3 h-3 text-white scale-0 peer-checked:scale-100 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                    </div>
-                    <span className="text-sm text-light-700 font-medium group-hover:text-light-900 transition-colors">{opt}</span>
-                  </label>
-                );
-              })}
-
-              {q.type === 'short-answer' && (() => {
-                const qKey = q.questionId || q.id;
-                return (
-                  <input
-                    type="text"
-                    className="w-full px-4 py-3 rounded-xl border border-light-200 bg-light-50 text-light-900 text-sm font-medium focus:outline-none focus:border-accent-indigo focus:ring-2 focus:ring-accent-indigo/20 transition-all"
-                    placeholder="Type your answer here..."
-                    value={answers[qKey] || ''}
-                    onChange={(e) => handleTextChange(qKey, e.target.value)}
-                    disabled={!!quizResult}
-                  />
-                );
-              })()}
-            </div>
-
-            {/* Per-question feedback */}
-            {quizResult && quizResult.results && quizResult.results[q.questionId || q.id] && (
-              <div className={`mt-4 p-4 rounded-xl border ${quizResult.results[q.questionId || q.id].correct ? 'bg-accent-emerald/5 border-accent-emerald/20' : 'bg-accent-rose/5 border-accent-rose/20'}`}>
-                <div className="flex items-start gap-2">
-                  {quizResult.results[q.questionId || q.id].correct
-                    ? <CheckCircle2 className="h-5 w-5 text-accent-emerald shrink-0 mt-0.5" />
-                    : <XCircle className="h-5 w-5 text-accent-rose shrink-0 mt-0.5" />}
-                  <div>
-                    <p className={`text-sm font-bold mb-1 ${quizResult.results[q.questionId || q.id].correct ? 'text-accent-emerald' : 'text-accent-rose'}`}>
-                      {quizResult.results[q.questionId || q.id].correct ? 'Correct!' : 'Incorrect'}
-                    </p>
-                    <div className="text-sm text-light-700 mb-2">
-                      <span className="font-semibold block mb-1">Correct Answer:</span>
-                      <div className="font-medium bg-white px-3 py-2 rounded-lg border border-light-200 inline-block">
-                        {q.type === 'short-answer'
-                          ? quizResult.results[q.questionId || q.id].correctAnswers.join(' / ')
-                          : quizResult.results[q.questionId || q.id].correctAnswers.map(idx => q.options[idx]).join(', ')}
-                      </div>
-                    </div>
-                    <div className="text-sm text-light-700">
-                      <span className="font-semibold block mb-1">Explanation:</span>
-                      <div className="prose prose-sm prose-slate">
-                        <ReactMarkdown>{quizResult.results[q.questionId || q.id].explanation || ''}</ReactMarkdown>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-
-        {/* â”€â”€ Submit / Result â”€â”€ */}
-        {!quizResult ? (
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-4 rounded-xl text-white font-bold text-sm bg-gradient-primary hover:opacity-95 shadow-md shadow-accent-violet/20 hover:shadow-lg hover:shadow-accent-violet/25 transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            {loading
-              ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              : 'Submit Challenge'}
-          </button>
-        ) : (
-          <div className={`bg-white rounded-2xl border p-6 text-center shadow-lg ${quizResult.passed ? 'border-accent-emerald/30 shadow-accent-emerald/5' : 'border-amber-200 shadow-amber-50'}`}>
-            <div className={`mx-auto h-12 w-12 rounded-full flex items-center justify-center mb-4 ${quizResult.passed ? 'bg-accent-emerald/10' : 'bg-amber-50'}`}>
-              {quizResult.passed
-                ? <CheckCircle2 className="h-6 w-6 text-accent-emerald" />
-                : <AlertCircle className="h-6 w-6 text-amber-500" />}
-            </div>
-
-            <h3 className="text-lg font-bold text-light-900 mb-1">
-              {quizResult.passed ? 'ðŸŽ‰ Challenge Passed!' : 'Challenge Completed'}
-            </h3>
-
-            <p className="text-2xl font-black text-accent-indigo mb-1">
-              {Object.values(quizResult.results).filter(r => r.correct).length} / {questions?.length}
-            </p>
-
-            <p className={`text-sm mb-6 ${quizResult.passed ? 'text-light-500' : 'text-amber-600 font-medium'}`}>
-              {quizResult.passed
-                ? "Great work! You've mastered this lesson."
-                : "You can review the explanations above, then retake or move forward."}
-            </p>
-
-            <div className="flex flex-col gap-3">
-              {/* Primary action */}
-              {quizResult.nextLessonId ? (
-                <Link
-                  to={`/lesson/${quizResult.nextLessonId}`}
-                  className={`w-full inline-flex py-3.5 px-4 rounded-xl text-white font-semibold text-sm transition-all items-center justify-center gap-2 ${
-                    quizResult.passed
-                      ? 'bg-accent-emerald hover:bg-emerald-600 shadow-md shadow-accent-emerald/20'
-                      : 'bg-accent-indigo hover:bg-indigo-600 shadow-md shadow-accent-indigo/20'
-                  }`}
-                >
-                  {quizResult.passed ? 'Continue to Next Lesson' : 'Move to Next Lesson'}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              ) : (
-                /* Last lesson in module */
-                <Link
-                  to={activeLesson?.moduleId && activeLesson?.courseId
-                    ? `/course/${activeLesson.courseId}/module/${activeLesson.moduleId}`
-                    : '/'}
-                  className="w-full inline-flex py-3.5 px-4 rounded-xl text-white font-semibold text-sm bg-accent-emerald hover:bg-emerald-600 shadow-md shadow-accent-emerald/20 transition-all items-center justify-center gap-2"
-                >
-                  {quizResult.passed ? 'ðŸ† Module Complete!' : 'Back to Module'}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              )}
-
-              {/* Retake â€” always available */}
-              <button
-                type="button"
-                onClick={handleRetake}
-                className="w-full inline-flex py-3 px-4 rounded-xl font-semibold text-sm border border-light-200 text-light-700 hover:bg-light-50 hover:border-light-300 transition-all items-center justify-center gap-2"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Retake Test
-              </button>
-            </div>
-          </div>
-        )}
-
-      </form>
-    </div>
-  );
 
   return (
     <div className="min-h-screen bg-light-50 flex flex-col animate-fadeIn">
@@ -533,7 +546,18 @@ export default function LessonViewer() {
               bg-white lg:bg-light-50
             `}
           >
-            <QuizPanel />
+            <QuizPanel
+              questions={questions}
+              answers={answers}
+              validationError={validationError}
+              quizResult={quizResult}
+              loading={loading}
+              activeLesson={activeLesson}
+              onOptionChange={handleOptionChange}
+              onTextChange={handleTextChange}
+              onSubmit={handleQuizSubmit}
+              onRetake={handleRetake}
+            />
           </div>
         )}
       </div>
