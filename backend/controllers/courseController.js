@@ -206,10 +206,11 @@ async function startModule(req, res) {
     if (mod.order > 1) {
       const prevMod = allModules.find(m => m.order === mod.order - 1);
       if (prevMod) {
-        const completedSet = new Set(user.completedLessons || []);
-        const prevDone = prevMod.lessonIds.every(id => completedSet.has(id));
-        if (!prevDone) {
-          return res.status(403).json({ message: 'Complete all lessons in the previous module first.' });
+        // Unlock next module when all tests in the previous module have been taken (attempted)
+        const takenSet = new Set(user.takenTests || []);
+        const prevAllTaken = prevMod.lessonIds.length > 0 && prevMod.lessonIds.every(id => takenSet.has(id));
+        if (!prevAllTaken) {
+          return res.status(403).json({ message: 'Take all lesson tests in the previous module first.' });
         }
       }
     }

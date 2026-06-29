@@ -82,9 +82,7 @@ export default function CourseOverview() {
       setStartingModuleId(mod.moduleId);
       setStartError('');
       try {
-        const data = await apiRequest(`/courses/${courseId}/modules/${mod.moduleId}/start`, {
-          method: 'POST',
-        });
+        const data = await apiRequest(`/courses/${courseId}/modules/${mod.moduleId}/start`, 'POST');
         dispatch(startModuleSuccess(data));
         navigate(`/course/${courseId}/module/${mod.moduleId}`);
       } catch (err) {
