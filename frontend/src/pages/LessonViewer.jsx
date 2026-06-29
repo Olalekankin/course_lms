@@ -365,7 +365,7 @@ export default function LessonViewer() {
       <div className="min-h-screen flex items-center justify-center bg-light-50">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-accent-indigo/20 border-t-accent-indigo rounded-full animate-spin" />
-          <p className="text-sm text-light-400 font-medium animate-pulse">Loading lessonâ€¦</p>
+          <p className="text-sm text-light-400 font-medium animate-pulse">Loading lesson</p>
         </div>
       </div>
     );
