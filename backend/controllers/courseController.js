@@ -6,16 +6,18 @@ const Answer   = require('../models/Answer');
 const User     = require('../models/User');
 
 // ─── Helper: derive moduleStatus for a given module ───────────────────────
+// Module is "complete" when ALL its lessons have had their test taken (submitted).
+// Next module unlocks when the previous module is complete (all tests taken).
 function getModuleStatus(mod, user, allModules, courseId) {
-  const completedSet = new Set(user.completedLessons || []);
+  const takenSet     = new Set(user.takenTests || []);
   const startedArr   = (user.startedModules && user.startedModules.get
     ? user.startedModules.get(courseId)
     : user.startedModules?.[courseId]) || [];
   const started = new Set(startedArr);
 
-  // Completed — every lesson in the module is done
-  const allDone = mod.lessonIds.length > 0 && mod.lessonIds.every(id => completedSet.has(id));
-  if (allDone) return 'completed';
+  // Completed — every lesson test in the module has been taken
+  const allTaken = mod.lessonIds.length > 0 && mod.lessonIds.every(id => takenSet.has(id));
+  if (allTaken) return 'completed';
 
   // Started (in-progress)
   if (started.has(mod.moduleId)) return 'in-progress';
@@ -23,17 +25,23 @@ function getModuleStatus(mod, user, allModules, courseId) {
   // Module 1 is always unlocked-not-started if not yet started/completed
   if (mod.order === 1) return 'unlocked-not-started';
 
-  // Check if previous module is 100% complete
+  // Check if previous module is complete (all tests taken)
   const prevMod = allModules.find(m => m.order === mod.order - 1);
   if (!prevMod) return 'locked';
-  const prevDone = prevMod.lessonIds.length > 0 && prevMod.lessonIds.every(id => completedSet.has(id));
-  return prevDone ? 'unlocked-not-started' : 'locked';
+  const prevAllTaken = prevMod.lessonIds.length > 0 && prevMod.lessonIds.every(id => takenSet.has(id));
+  return prevAllTaken ? 'unlocked-not-started' : 'locked';
 }
 
 // ─── Helper: count completed lessons in a module ───────────────────────────
 function countCompleted(mod, user) {
   const completedSet = new Set(user.completedLessons || []);
   return mod.lessonIds.filter(id => completedSet.has(id)).length;
+}
+
+// ─── Helper: count taken tests in a module ───────────────────────────────────
+function countTaken(mod, user) {
+  const takenSet = new Set(user.takenTests || []);
+  return mod.lessonIds.filter(id => takenSet.has(id)).length;
 }
 
 // ─── Endpoint 1: GET /api/courses ─────────────────────────────────────────
@@ -140,14 +148,18 @@ async function getModuleDetail(req, res) {
 
     const lessons = await Lesson.find({ moduleId, courseId }).sort({ orderInModule: 1 });
     const completedSet = new Set(user.completedLessons || []);
+    const takenSet     = new Set(user.takenTests || []);
 
-    // Determine which lesson is "next" (first not completed, in order)
+    // Determine which lesson is "next":
+    // - A lesson is accessible if its test has been taken OR it's the first untaken one
+    // - "isNext" marks the first lesson whose test hasn't been taken yet
     let foundNext = false;
     const lessonList = lessons.map(l => {
-      const isCompleted = completedSet.has(l.lessonId);
+      const isCompleted  = completedSet.has(l.lessonId);
+      const isTestTaken  = takenSet.has(l.lessonId);
       let isNext = false;
-      if (!isCompleted && !foundNext) {
-        isNext = true;
+      if (!isTestTaken && !foundNext) {
+        isNext    = true;
         foundNext = true;
       }
       return {
@@ -159,6 +171,7 @@ async function getModuleDetail(req, res) {
         frequency:   l.frequency,
         thumbnailUrl: l.thumbnailUrl,
         isCompleted,
+        isTestTaken,
         isNext,
       };
     });
@@ -334,12 +347,13 @@ async function submitQuiz(req, res) {
     if (!mod) return res.status(404).json({ message: 'Module not found' });
 
     const completedSet = new Set(user.completedLessons || []);
+    const takenSet     = new Set(user.takenTests || []);
 
-    // ── Enforce strict lesson order ───────────────────────────────────────
+    // ── Enforce strict lesson order (based on test taken, not completed) ─
     if (lesson.orderInModule > 1) {
       const prevLessonId = mod.lessonIds[lesson.orderInModule - 2]; // 0-indexed
-      if (prevLessonId && !completedSet.has(prevLessonId)) {
-        return res.status(403).json({ message: 'Complete the previous lesson first.' });
+      if (prevLessonId && !takenSet.has(prevLessonId)) {
+        return res.status(403).json({ message: 'Take the previous lesson\'s test first.' });
       }
     }
 
@@ -383,46 +397,50 @@ async function submitQuiz(req, res) {
       };
     }
 
-    // ── Update user progress on pass ──────────────────────────────────────
-    let nextLessonId         = null;
-    let isModuleComplete     = false;
-    let nextModuleUnlockable = false;
-
-    if (allCorrect) {
-      if (!completedSet.has(lessonId)) {
-        user.completedLessons.push(lessonId);
-        completedSet.add(lessonId);
-      }
-
-      // Determine next lesson within module
-      const currentIdx = mod.lessonIds.indexOf(lessonId);
-      if (currentIdx >= 0 && currentIdx + 1 < mod.lessonIds.length) {
-        nextLessonId = mod.lessonIds[currentIdx + 1];
-      }
-
-      // Check if this was the last lesson in the module
-      isModuleComplete = mod.lessonIds.every(id => completedSet.has(id));
-
-      // Check if next module exists and is now unlockable
-      if (isModuleComplete) {
-        const allModules = await Module.find({ courseId: lesson.courseId }).sort({ order: 1 });
-        const nextMod    = allModules.find(m => m.order === mod.order + 1);
-        nextModuleUnlockable = !!nextMod;
-      }
-
-      // Keep currentUnlockedLessons in sync for backward compat
-      if (nextLessonId) {
-        if (user.currentUnlockedLessons.set) {
-          user.currentUnlockedLessons.set(lesson.courseId, nextLessonId);
-        } else {
-          user.currentUnlockedLessons[lesson.courseId] = nextLessonId;
-        }
-        user.markModified('currentUnlockedLessons');
-      }
-
-      user.markModified('completedLessons');
-      await user.save();
+    // ── Always record that this test was taken (pass or fail) ─────────────
+    if (!takenSet.has(lessonId)) {
+      if (!user.takenTests) user.takenTests = [];
+      user.takenTests.push(lessonId);
+      takenSet.add(lessonId);
+      user.markModified('takenTests');
     }
+
+    // ── On pass: also record completion ───────────────────────────────────
+    if (allCorrect && !completedSet.has(lessonId)) {
+      user.completedLessons.push(lessonId);
+      completedSet.add(lessonId);
+      user.markModified('completedLessons');
+    }
+
+    // ── Determine next lesson (available on pass OR fail — test was taken) ─
+    const currentIdx = mod.lessonIds.indexOf(lessonId);
+    let nextLessonId = null;
+    if (currentIdx >= 0 && currentIdx + 1 < mod.lessonIds.length) {
+      nextLessonId = mod.lessonIds[currentIdx + 1];
+    }
+
+    // ── Module complete = all tests taken (regardless of pass/fail) ───────
+    const isModuleComplete = mod.lessonIds.every(id => takenSet.has(id));
+
+    // Check if next module exists and is now unlockable
+    let nextModuleUnlockable = false;
+    if (isModuleComplete) {
+      const allModules = await Module.find({ courseId: lesson.courseId }).sort({ order: 1 });
+      const nextMod    = allModules.find(m => m.order === mod.order + 1);
+      nextModuleUnlockable = !!nextMod;
+    }
+
+    // Keep currentUnlockedLessons in sync
+    if (nextLessonId) {
+      if (user.currentUnlockedLessons.set) {
+        user.currentUnlockedLessons.set(lesson.courseId, nextLessonId);
+      } else {
+        user.currentUnlockedLessons[lesson.courseId] = nextLessonId;
+      }
+      user.markModified('currentUnlockedLessons');
+    }
+
+    await user.save();
 
     const currentUnlockedLessonsObj = {};
     if (user.currentUnlockedLessons && user.currentUnlockedLessons.forEach) {
@@ -435,14 +453,15 @@ async function submitQuiz(req, res) {
       passed:               allCorrect,
       message:              allCorrect
         ? 'Congratulations! You passed the Interview Challenge!'
-        : 'Some answers are incorrect. Review the explanations and try again.',
+        : 'Some answers were incorrect. Review the explanations below.',
       nextLessonId,
       isModuleComplete,
       nextModuleUnlockable,
       results,
       userProgress: {
-        completedLessons:         user.completedLessons,
-        currentUnlockedLessons:   currentUnlockedLessonsObj,
+        completedLessons:       user.completedLessons,
+        takenTests:             user.takenTests,
+        currentUnlockedLessons: currentUnlockedLessonsObj,
       },
     });
   } catch (err) {

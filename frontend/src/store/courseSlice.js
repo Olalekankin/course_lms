@@ -93,42 +93,54 @@ const courseSlice = createSlice({
       state.loading = false;
       state.quizResult = action.payload;
 
-      if (action.payload.passed && state.activeLesson) {
-        // Mark lesson completed in activeModule lesson list
-        if (state.activeModule) {
-          const lesson = state.activeModule.lessons.find(
-            l => l.lessonId === state.activeLesson.lessonId
-          );
-          if (lesson) {
+      if (state.activeLesson && state.activeModule) {
+        const lesson = state.activeModule.lessons.find(
+          l => l.lessonId === state.activeLesson.lessonId
+        );
+        if (lesson) {
+          // Always mark test as taken (regardless of pass/fail)
+          lesson.isTestTaken = true;
+          // Only mark completed if passed
+          if (action.payload.passed) {
             lesson.isCompleted = true;
             lesson.isNext = false;
           }
-          // Set next lesson as isNext
+        }
+        // If passed, set next lesson as isNext
+        if (action.payload.passed) {
           const nextId = action.payload.nextLessonId;
           if (nextId) {
             const next = state.activeModule.lessons.find(l => l.lessonId === nextId);
             if (next) next.isNext = true;
           }
-          // Update module status if module is now complete
-          if (action.payload.isModuleComplete) {
-            state.activeModule.moduleStatus = 'completed';
-          }
+        } else if (action.payload.nextLessonId) {
+          // On fail: next lesson becomes accessible (isNext) since test was taken
+          const nextLesson = state.activeModule.lessons.find(
+            l => l.lessonId === action.payload.nextLessonId
+          );
+          if (nextLesson && !nextLesson.isTestTaken) nextLesson.isNext = true;
         }
 
-        // Unlock next module in syllabus if applicable
-        if (action.payload.isModuleComplete && action.payload.nextModuleUnlockable) {
-          if (state.activeCourse && state.activeCourse.syllabus) {
-            const currentModuleId = state.activeLesson.moduleId;
-            const currentIdx = state.activeCourse.syllabus.findIndex(
-              m => m.moduleId === currentModuleId
-            );
-            if (currentIdx >= 0) {
-              state.activeCourse.syllabus[currentIdx].moduleStatus = 'completed';
-            }
-            const nextModule = state.activeCourse.syllabus[currentIdx + 1];
-            if (nextModule && nextModule.moduleStatus === 'locked') {
-              nextModule.moduleStatus = 'unlocked-not-started';
-            }
+        // Module complete when all lessons have had their test taken
+        const allTaken = state.activeModule.lessons.every(l => l.isTestTaken);
+        if (allTaken) {
+          state.activeModule.moduleStatus = 'completed';
+        }
+      }
+
+      // Unlock next module in syllabus if applicable
+      if (action.payload.isModuleComplete && action.payload.nextModuleUnlockable) {
+        if (state.activeCourse && state.activeCourse.syllabus && state.activeLesson) {
+          const currentModuleId = state.activeLesson.moduleId;
+          const currentIdx = state.activeCourse.syllabus.findIndex(
+            m => m.moduleId === currentModuleId
+          );
+          if (currentIdx >= 0) {
+            state.activeCourse.syllabus[currentIdx].moduleStatus = 'completed';
+          }
+          const nextModule = state.activeCourse.syllabus[currentIdx + 1];
+          if (nextModule && nextModule.moduleStatus === 'locked') {
+            nextModule.moduleStatus = 'unlocked-not-started';
           }
         }
       }

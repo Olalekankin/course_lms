@@ -61,6 +61,7 @@ export default function ModuleDetail() {
 
   const { name, description, order, moduleStatus, lessons } = activeModule;
   const completedCount = lessons.filter(l => l.isCompleted).length;
+  const takenCount     = lessons.filter(l => l.isTestTaken && !l.isCompleted).length;
   const totalCount     = lessons.length;
 
   return (
@@ -133,9 +134,11 @@ export default function ModuleDetail() {
                   transition-all duration-200 group
                   ${lesson.isCompleted
                     ? 'border-emerald-200 hover:shadow-md hover:shadow-emerald-50 hover:-translate-y-0.5'
-                    : lesson.isNext
-                      ? 'border-indigo-300 ring-2 ring-indigo-100 hover:shadow-lg hover:shadow-indigo-50 hover:-translate-y-1'
-                      : 'border-light-200 hover:border-light-300 hover:shadow-md hover:-translate-y-0.5'
+                    : lesson.isTestTaken
+                      ? 'border-amber-200 hover:shadow-md hover:shadow-amber-50 hover:-translate-y-0.5'
+                      : lesson.isNext
+                        ? 'border-indigo-300 ring-2 ring-indigo-100 hover:shadow-lg hover:shadow-indigo-50 hover:-translate-y-1'
+                        : 'border-light-200 hover:border-light-300 hover:shadow-md hover:-translate-y-0.5'
                   }
                 `}
               >
@@ -145,12 +148,14 @@ export default function ModuleDetail() {
                     Lesson {lesson.number}
                   </span>
                   <div className={`h-7 w-7 rounded-full flex items-center justify-center shadow-sm
-                    ${lesson.isCompleted ? 'bg-emerald-500' : lesson.isNext ? 'bg-indigo-600' : 'bg-light-100'}`}>
+                    ${lesson.isCompleted ? 'bg-emerald-500' : lesson.isTestTaken ? 'bg-amber-400' : lesson.isNext ? 'bg-indigo-600' : 'bg-light-100'}`}>
                     {lesson.isCompleted
                       ? <CheckCircle2 className="h-4 w-4 text-white" />
-                      : lesson.isNext
-                        ? <PlayCircle className="h-4 w-4 text-white" />
-                        : <Circle className="h-3.5 w-3.5 text-light-400" />
+                      : lesson.isTestTaken
+                        ? <AlertCircle className="h-4 w-4 text-white" />
+                        : lesson.isNext
+                          ? <PlayCircle className="h-4 w-4 text-white" />
+                          : <Circle className="h-3.5 w-3.5 text-light-400" />
                     }
                   </div>
                 </div>
@@ -171,7 +176,12 @@ export default function ModuleDetail() {
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${diffClass}`}>
                     {lesson.difficulty}
                   </span>
-                  {lesson.isNext && (
+                  {lesson.isTestTaken && !lesson.isCompleted && (
+                    <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100">
+                      ✗ Attempted
+                    </span>
+                  )}
+                  {lesson.isNext && !lesson.isTestTaken && (
                     <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100 animate-pulse">
                       Up Next
                     </span>

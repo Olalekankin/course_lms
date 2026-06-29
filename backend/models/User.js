@@ -9,6 +9,9 @@ const userSchema = new mongoose.Schema({
   // lessonIds that have had a passing quiz submission
   completedLessons: [{ type: String }],
 
+  // lessonIds where the quiz was taken (submitted), regardless of pass/fail
+  takenTests: [{ type: String }],
+
   // courseId → current unlocked lessonId (kept for backward compat with existing logic)
   currentUnlockedLessons: {
     type: Map,

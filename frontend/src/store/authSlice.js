@@ -38,10 +38,11 @@ const authSlice = createSlice({
     },
     updateProgress: (state, action) => {
       if (state.user) {
-        const { completedLessons, currentUnlockedLesson, currentUnlockedLessons } = action.payload;
-        state.user.completedLessons = completedLessons;
-        state.user.currentUnlockedLesson = currentUnlockedLesson;
-        if (currentUnlockedLessons) {
+        const { completedLessons, takenTests, currentUnlockedLesson, currentUnlockedLessons } = action.payload;
+        if (completedLessons !== undefined) state.user.completedLessons = completedLessons;
+        if (takenTests !== undefined) state.user.takenTests = takenTests;
+        if (currentUnlockedLesson !== undefined) state.user.currentUnlockedLesson = currentUnlockedLesson;
+        if (currentUnlockedLessons !== undefined) {
           state.user.currentUnlockedLessons = currentUnlockedLessons;
         }
         localStorage.setItem('user', JSON.stringify(state.user));
