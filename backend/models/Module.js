@@ -5,7 +5,9 @@ const moduleSchema = new mongoose.Schema({
   courseId:    { type: String, required: true },
   order:       { type: Number, required: true },   // 1-based position within course
   name:        { type: String, required: true },
+  slug:        { type: String, default: '' },
   description: { type: String, default: '' },
+  estimatedDuration: { type: String, default: '' },
   lessonIds:   [{ type: String }],                 // ordered lesson IDs for progress calc
 });
 

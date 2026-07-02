@@ -6,12 +6,17 @@ const lessonSchema = new mongoose.Schema({
   courseId:      { type: String, required: true },
   number:        { type: String, required: true },   // e.g. "1.1"
   title:         { type: String, required: true },
+  slug:          { type: String, default: '' },
   objective:     { type: String, default: '' },
   difficulty:    { type: String, default: 'Beginner' },
   frequency:     { type: String, default: 'High' },
+  estimatedDuration: { type: String, default: '' },
   thumbnailUrl:  { type: String, default: '' },
   orderInModule: { type: Number, required: true },   // 1-based position within module
   content:       { type: String, default: '' },
+  lessonMarkdown: { type: String, default: '' },
+  questionsMarkdown: { type: String, default: '' },
+  answersMarkdown: { type: String, default: '' },
 });
 
 lessonSchema.index({ courseId: 1, moduleId: 1, orderInModule: 1 });

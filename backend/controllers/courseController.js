@@ -65,8 +65,11 @@ async function getCoursesList(req, res) {
 
       return {
         courseId:     course.courseId,
+        slug:         course.slug,
         title:        course.title,
         description:  course.description,
+        difficulty:   course.difficulty,
+        estimatedDuration: course.estimatedDuration,
         totalModules: course.totalModules,
         totalLessons: course.totalLessons,
         userProgress: {
@@ -107,7 +110,9 @@ async function getCourseOverview(req, res) {
         moduleId:               mod.moduleId,
         order:                  mod.order,
         name:                   mod.name,
+        slug:                   mod.slug,
         description:            mod.description,
+        estimatedDuration:      mod.estimatedDuration,
         lessonCount:            mod.lessonIds.length,
         lessonTitles:           lessons.map(l => l.title),
         moduleStatus,
@@ -117,8 +122,13 @@ async function getCourseOverview(req, res) {
 
     res.json({
       courseId:     course.courseId,
+      slug:         course.slug,
       title:        course.title,
       description:  course.description,
+      difficulty:   course.difficulty,
+      estimatedDuration: course.estimatedDuration,
+      prerequisites: course.prerequisites || [],
+      learningObjectives: course.learningObjectives || [],
       totalModules: course.totalModules,
       totalLessons: course.totalLessons,
       userProgress: { completedLessons: completed, percentComplete: pct },
@@ -166,9 +176,11 @@ async function getModuleDetail(req, res) {
         lessonId:    l.lessonId,
         number:      l.number,
         title:       l.title,
+        slug:        l.slug,
         objective:   l.objective,
         difficulty:  l.difficulty,
         frequency:   l.frequency,
+        estimatedDuration: l.estimatedDuration,
         thumbnailUrl: l.thumbnailUrl,
         isCompleted,
         isTestTaken,
@@ -247,7 +259,8 @@ async function startModule(req, res) {
       if (!isCompleted && !foundNext) { isNext = true; foundNext = true; }
       return {
         lessonId: l.lessonId, number: l.number, title: l.title,
-        objective: l.objective, difficulty: l.difficulty, frequency: l.frequency,
+        slug: l.slug, objective: l.objective, difficulty: l.difficulty, frequency: l.frequency,
+        estimatedDuration: l.estimatedDuration,
         thumbnailUrl: l.thumbnailUrl, isCompleted, isNext,
       };
     });
@@ -280,9 +293,18 @@ async function getLessonDetail(req, res) {
 
     // Module 1 is auto-accessible even without explicit "start" for backward compat
     const mod = await Module.findOne({ moduleId: lesson.moduleId, courseId: lesson.courseId });
-    if (!moduleStarted && mod && mod.order > 1) {
+    const questionCount = await Question.countDocuments({ lessonId });
+    const hasMarkdownChallenge = Boolean(
+      lesson.questionsMarkdown?.trim() || lesson.answersMarkdown?.trim()
+    );
+    if (!moduleStarted && mod && mod.order > 1 && !hasMarkdownChallenge) {
       return res.status(403).json({ message: 'Start this module before accessing its lessons.' });
     }
+
+    const courseModules = await Module.find({ courseId: lesson.courseId }).sort({ order: 1 });
+    const orderedLessonIds = courseModules.flatMap(m => m.lessonIds || []);
+    const currentIndex = orderedLessonIds.indexOf(lesson.lessonId);
+    const nextLessonId = currentIndex >= 0 ? orderedLessonIds[currentIndex + 1] || null : null;
 
     res.json({
       lessonId:    lesson.lessonId,
@@ -290,11 +312,18 @@ async function getLessonDetail(req, res) {
       courseId:    lesson.courseId,
       number:      lesson.number,
       title:       lesson.title,
+      slug:        lesson.slug,
       objective:   lesson.objective,
       difficulty:  lesson.difficulty,
       frequency:   lesson.frequency,
+      estimatedDuration: lesson.estimatedDuration,
       thumbnailUrl: lesson.thumbnailUrl,
       content:     lesson.content,
+      lessonMarkdown: lesson.lessonMarkdown || lesson.content,
+      questionsMarkdown: lesson.questionsMarkdown || '',
+      answersMarkdown: lesson.answersMarkdown || '',
+      hasChallenge: questionCount > 0,
+      nextLessonId,
     });
   } catch (err) {
     console.error('[courseController] getLessonDetail:', err);

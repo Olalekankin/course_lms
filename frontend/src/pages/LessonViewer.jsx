@@ -6,28 +6,167 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import confetti from 'canvas-confetti';
-import { ArrowLeft, ArrowRight, CheckCircle2, XCircle, AlertCircle, PlayCircle, BookOpen, RefreshCw } from 'lucide-react';
+import {
+  ArrowLeft, ArrowRight, CheckCircle2, XCircle, AlertCircle,
+  PlayCircle, BookOpen, RefreshCw, CheckCheck, Lock, Circle,
+  ChevronLeft, ChevronRight, LayoutList,
+} from 'lucide-react';
 import { 
   fetchLessonStart, fetchLessonSuccess, fetchLessonFailure, 
   submitQuizStart, submitQuizSuccess, submitQuizFailure, clearQuizResult 
 } from '../store/courseSlice';
 import { updateProgress } from '../store/authSlice';
 import { apiRequest } from '../utils/api';
+// ── ModuleSidebar: shows all lessons in the current module on desktop ──────
+function ModuleSidebar({ activeLesson, moduleLessons, sidebarOpen, onToggle }) {
+  return (
+    <div
+      className={`
+        hidden lg:flex flex-col shrink-0
+        border-r border-light-200 bg-white
+        overflow-hidden transition-all duration-300 ease-in-out
+        ${sidebarOpen ? 'w-64' : 'w-14'}
+      `}
+      style={{ minHeight: '100vh' }}
+    >
+      {/* Header row */}
+      <div className={`flex items-center border-b border-light-100 h-14 px-3 shrink-0 ${sidebarOpen ? 'justify-between' : 'justify-center'}`}>
+        {sidebarOpen && (
+          <div className="flex items-center gap-2 overflow-hidden">
+            <LayoutList className="h-4 w-4 text-accent-indigo shrink-0" />
+            <span className="text-xs font-bold text-light-900 uppercase tracking-wide truncate">
+              Module Lessons
+            </span>
+          </div>
+        )}
+        <button
+          onClick={onToggle}
+          className="p-1.5 rounded-lg hover:bg-light-100 text-light-400 hover:text-light-700 transition-colors shrink-0"
+          title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </button>
+      </div>
+
+      {/* Lesson list */}
+      <div className="flex-1 overflow-y-auto py-3">
+        {moduleLessons.length === 0 ? (
+          <div className={`flex items-center justify-center py-8`}>
+            <div className="w-4 h-4 border-2 border-accent-indigo/30 border-t-accent-indigo rounded-full animate-spin" />
+          </div>
+        ) : (
+          moduleLessons.map((lesson) => {
+            const isCurrent = lesson.lessonId === activeLesson?.lessonId;
+            const isCompleted = lesson.isCompleted;
+            const isTaken = lesson.isTestTaken;
+            const isLocked = !lesson.isCompleted && !lesson.isTestTaken && !lesson.isNext && !isCurrent;
+
+            let StatusIcon = Circle;
+            let iconColor = 'text-light-300';
+            if (isCompleted)    { StatusIcon = CheckCheck;    iconColor = 'text-accent-emerald'; }
+            else if (isTaken)   { StatusIcon = CheckCircle2;  iconColor = 'text-amber-400'; }
+            else if (isLocked)  { StatusIcon = Lock;          iconColor = 'text-light-300'; }
+            else                { StatusIcon = Circle;         iconColor = 'text-accent-indigo'; }
+
+            const content = (
+              <>
+                <div className={`shrink-0 ${sidebarOpen ? '' : 'mx-auto'}`}>
+                  <StatusIcon className={`h-4 w-4 ${isCurrent ? 'text-accent-indigo' : iconColor}`} />
+                </div>
+                {sidebarOpen && (
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-xs font-semibold leading-snug truncate ${
+                      isCurrent ? 'text-accent-indigo' : isLocked ? 'text-light-400' : 'text-light-800'
+                    }`}>
+                      <span className="text-light-400 mr-1">{lesson.number}.</span>
+                      {lesson.title}
+                    </p>
+                    {isCurrent && (
+                      <span className="text-[10px] font-bold text-accent-indigo/70 uppercase tracking-wide">Current</span>
+                    )}
+                    {isCompleted && !isCurrent && (
+                      <span className="text-[10px] font-bold text-accent-emerald/70 uppercase tracking-wide">Passed</span>
+                    )}
+                    {isTaken && !isCompleted && !isCurrent && (
+                      <span className="text-[10px] font-bold text-amber-500/80 uppercase tracking-wide">Attempted</span>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+
+            const baseClass = `
+              flex items-center gap-3 px-3 py-2.5 mx-2 rounded-xl mb-0.5
+              transition-all duration-150
+              ${isCurrent
+                ? 'bg-accent-indigo/10 border border-accent-indigo/20'
+                : isLocked
+                  ? 'opacity-50 cursor-not-allowed border border-transparent'
+                  : 'hover:bg-light-50 border border-transparent hover:border-light-200 cursor-pointer'}
+              ${!sidebarOpen ? 'justify-center' : ''}
+            `;
+
+            if (isLocked) {
+              return (
+                <div key={lesson.lessonId} className={baseClass} title={sidebarOpen ? undefined : `Lesson ${lesson.number}: ${lesson.title}`}>
+                  {content}
+                </div>
+              );
+            }
+
+            return (
+              <Link
+                key={lesson.lessonId}
+                to={`/lesson/${lesson.lessonId}`}
+                className={baseClass}
+                title={sidebarOpen ? undefined : `Lesson ${lesson.number}: ${lesson.title}`}
+              >
+                {content}
+              </Link>
+            );
+          })
+        )}
+      </div>
+
+      {/* Footer: back to module */}
+      {sidebarOpen && activeLesson?.moduleId && activeLesson?.courseId && (
+        <div className="shrink-0 border-t border-light-100 p-3">
+          <Link
+            to={`/course/${activeLesson.courseId}/module/${activeLesson.moduleId}`}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-light-500 hover:text-light-900 hover:bg-light-50 transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to Module
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── QuizPanel extracted to module scope so React never remounts it on parent re-render ──
 // (Defining a component inside a render function causes remount on every parent state change,
 //  which drops focus from inputs on every keystroke.)
 function QuizPanel({
   questions,
+  questionsMarkdown,
+  answersMarkdown,
   answers,
   validationError,
   quizResult,
   loading,
   activeLesson,
+  showMarkdownAnswers,
   onOptionChange,
   onTextChange,
   onSubmit,
   onRetake,
+  onShowMarkdownAnswers,
 }) {
+  const hasInteractiveQuestions = (questions || []).length > 0;
+  const hasMarkdownQuestions = Boolean(questionsMarkdown?.trim());
+  const hasMarkdownAnswers = Boolean(answersMarkdown?.trim());
+
   return (
     <div className="p-6 sm:p-10 lg:p-12">
 
@@ -36,9 +175,13 @@ function QuizPanel({
           <PlayCircle className="h-4 w-4 text-accent-indigo" />
           <span className="text-xs font-bold text-light-900 tracking-wide">INTERVIEW CHALLENGE</span>
         </div>
-        <h2 className="text-2xl font-bold text-light-900 mb-2">Test your knowledge</h2>
+        <h2 className="text-2xl font-bold text-light-900 mb-2">
+          {hasInteractiveQuestions ? 'Test your knowledge' : 'Review questions and answers'}
+        </h2>
         <p className="text-light-500 text-sm">
-          {quizResult
+          {!hasInteractiveQuestions
+            ? 'Use these prompts and explanations to check your understanding.'
+            : quizResult
             ? quizResult.passed
               ? 'Great work! Review below or continue to the next lesson.'
               : 'Review the explanations — you can retake or move forward.'
@@ -52,6 +195,58 @@ function QuizPanel({
           <div className="bg-accent-rose/5 border border-accent-rose/20 rounded-xl p-4 flex items-start gap-3">
             <AlertCircle className="h-5 w-5 text-accent-rose shrink-0 mt-0.5" />
             <span className="text-sm text-accent-rose font-medium">{validationError}</span>
+          </div>
+        )}
+
+        {!hasInteractiveQuestions && (hasMarkdownQuestions || hasMarkdownAnswers) && (
+          <div className="space-y-6">
+            {hasMarkdownQuestions && (
+              <section className="bg-white rounded-2xl border border-light-200 p-6 shadow-sm">
+                <div className="prose prose-slate prose-headings:font-bold prose-h2:text-xl prose-h2:text-light-900 prose-a:text-accent-violet max-w-none">
+                  <MarkdownBlock>{questionsMarkdown}</MarkdownBlock>
+                </div>
+              </section>
+            )}
+
+            {hasMarkdownAnswers && !showMarkdownAnswers && (
+              <button
+                type="button"
+                onClick={onShowMarkdownAnswers}
+                className="w-full py-4 rounded-xl text-white font-bold text-sm bg-gradient-primary hover:opacity-95 shadow-md shadow-accent-violet/20 hover:shadow-lg hover:shadow-accent-violet/25 transform active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              >
+                Show Answer
+              </button>
+            )}
+
+            {hasMarkdownAnswers && showMarkdownAnswers && (
+              <section className="bg-white rounded-2xl border border-light-200 p-6 shadow-sm">
+                <div className="prose prose-slate prose-headings:font-bold prose-h2:text-xl prose-h2:text-light-900 prose-a:text-accent-violet max-w-none">
+                  <MarkdownBlock>{answersMarkdown}</MarkdownBlock>
+                </div>
+              </section>
+            )}
+
+            {showMarkdownAnswers && (
+              activeLesson?.nextLessonId ? (
+                <Link
+                  to={`/lesson/${activeLesson.nextLessonId}`}
+                  className="w-full inline-flex py-3.5 px-4 rounded-xl text-white font-semibold text-sm bg-accent-indigo hover:bg-indigo-600 shadow-md shadow-accent-indigo/20 transition-all items-center justify-center gap-2"
+                >
+                  Continue to Next Lesson
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              ) : (
+                <Link
+                  to={activeLesson?.moduleId && activeLesson?.courseId
+                    ? `/course/${activeLesson.courseId}/module/${activeLesson.moduleId}`
+                    : '/'}
+                  className="w-full inline-flex py-3.5 px-4 rounded-xl text-white font-semibold text-sm bg-accent-emerald hover:bg-emerald-600 shadow-md shadow-accent-emerald/20 transition-all items-center justify-center gap-2"
+                >
+                  Back to Module
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              )
+            )}
           </div>
         )}
 
@@ -170,7 +365,7 @@ function QuizPanel({
         ))}
 
         {/* ── Submit / Result ── */}
-        {!quizResult ? (
+        {hasInteractiveQuestions && (!quizResult ? (
           <button
             type="submit"
             disabled={loading}
@@ -237,10 +432,54 @@ function QuizPanel({
               </button>
             </div>
           </div>
-        )}
+        ))}
 
       </form>
     </div>
+  );
+}
+
+function MarkdownBlock({ children }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        table({node, ...props}) {
+          return (
+            <div className="overflow-x-auto my-6 rounded-xl border border-light-200 shadow-sm">
+              <table {...props} className="min-w-full text-sm" />
+            </div>
+          );
+        },
+        thead({node, ...props}) { return <thead {...props} className="bg-indigo-50 text-indigo-900" />; },
+        tbody({node, ...props}) { return <tbody {...props} className="divide-y divide-light-100" />; },
+        tr({node, ...props})    { return <tr {...props} className="even:bg-light-50/60 hover:bg-indigo-50/40 transition-colors" />; },
+        th({node, ...props})    { return <th {...props} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-indigo-700 whitespace-nowrap" />; },
+        td({node, ...props})    { return <td {...props} className="px-4 py-3 text-light-700 font-medium align-top" />; },
+        hr({node, ...props})    { return <hr {...props} className="my-1.5 border-light-200" />; },
+        code({node, inline, className, children, ...props}) {
+          const match = /language-(\w+)/.exec(className || '');
+          return !inline && match ? (
+            <div className="rounded-xl overflow-hidden shadow-sm my-6 border border-light-200">
+              <SyntaxHighlighter
+                {...props}
+                children={String(children).replace(/\n$/, '')}
+                style={oneLight}
+                language={match[1]}
+                PreTag="div"
+                customStyle={{ margin: 0, padding: '1.5rem', background: '#f8fafc', fontSize: '0.9rem' }}
+              />
+            </div>
+          ) : (
+            <code {...props} className={`${className} bg-light-100 text-accent-violet px-1.5 py-0.5 rounded-md text-sm font-mono`}>
+              {children}
+            </code>
+          );
+        }
+      }}
+    >
+      {children || ''}
+    </ReactMarkdown>
   );
 }
 
@@ -257,8 +496,33 @@ export default function LessonViewer() {
   const [showQuiz, setShowQuiz] = useState(false);
   const [questions, setQuestions] = useState(null);
   const [questionsLoading, setQuestionsLoading] = useState(false);
+  const [showMarkdownAnswers, setShowMarkdownAnswers] = useState(false);
   // Mobile tab: 'lesson' | 'challenge'
   const [activeTab, setActiveTab] = useState('lesson');
+
+  // Desktop sidebar: open by default, auto-collapses when quiz opens
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [moduleLessons, setModuleLessons] = useState([]);
+
+  // Auto-collapse sidebar when quiz panel opens; re-open when it closes
+  useEffect(() => {
+    setSidebarOpen(!showQuiz);
+  }, [showQuiz]);
+
+  // Fetch sibling lessons whenever activeLesson's module changes
+  useEffect(() => {
+    if (!activeLesson?.moduleId || !activeLesson?.courseId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiRequest(`/courses/${activeLesson.courseId}/modules/${activeLesson.moduleId}`);
+        if (!cancelled && data?.lessons) setModuleLessons(data.lessons);
+      } catch {
+        // silently fail — sidebar stays empty
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeLesson?.moduleId, activeLesson?.courseId]);
 
 
   useEffect(() => {
@@ -273,6 +537,7 @@ export default function LessonViewer() {
         setShowQuiz(false);
         setActiveTab('lesson');
         setQuestions(null);
+        setShowMarkdownAnswers(false);
       } catch (err) {
         dispatch(fetchLessonFailure(err.message || 'Failed to load lesson'));
       }
@@ -302,7 +567,7 @@ export default function LessonViewer() {
   };
 
   const handleTakeChallenge = async () => {
-    if (!questions) {
+    if (activeLesson?.hasChallenge && !questions) {
       try {
         setQuestionsLoading(true);
         const data = await apiRequest(`/courses/lessons/${id}/questions`);
@@ -344,6 +609,13 @@ export default function LessonViewer() {
         takenTests: data.userProgress.takenTests,
         currentUnlockedLessons: data.userProgress.currentUnlockedLessons,
       }));
+      // Refresh sidebar lesson statuses after quiz submission
+      if (activeLesson?.moduleId && activeLesson?.courseId) {
+        try {
+          const modData = await apiRequest(`/courses/${activeLesson.courseId}/modules/${activeLesson.moduleId}`);
+          if (modData?.lessons) setModuleLessons(modData.lessons);
+        } catch { /* ignore */ }
+      }
       if (data.passed) {
         confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, colors: ['#7c3aed', '#4f46e5', '#10b981'] });
       }
@@ -359,7 +631,6 @@ export default function LessonViewer() {
     setValidationError('');
   };
 
-  // â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-light-50">
@@ -388,6 +659,12 @@ export default function LessonViewer() {
   }
 
   if (!activeLesson) return null;
+
+  const hasChallengeContent = Boolean(
+    activeLesson.hasChallenge ||
+    activeLesson.questionsMarkdown?.trim() ||
+    activeLesson.answersMarkdown?.trim()
+  );
 
   return (
     <div className="min-h-screen bg-light-50 flex flex-col animate-fadeIn">
@@ -439,8 +716,19 @@ export default function LessonViewer() {
         </div>
       )}
 
-      {/* â”€â”€ Main Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+      {/* ── Main Layout ──────────────────────────────────────────────────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* ── Desktop Sidebar ── */}
+        <ModuleSidebar
+          activeLesson={activeLesson}
+          moduleLessons={moduleLessons}
+          sidebarOpen={sidebarOpen}
+          onToggle={() => setSidebarOpen(v => !v)}
+        />
+
+        {/* ── Lesson + Quiz panel ── */}
+        <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
 
         {/* LEFT: Lesson Content */}
         <div
@@ -453,18 +741,18 @@ export default function LessonViewer() {
             bg-white transition-all duration-300
           `}
         >
-          {/* Top nav â€” always on desktop; only when quiz closed on mobile */}
+          {/* Top nav — always on desktop; only when quiz closed on mobile */}
           <div className={`sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-light-200 px-6 py-4 flex items-center justify-between ${showQuiz ? 'hidden lg:flex' : 'flex'}`}>
             <Link
               to={activeLesson?.moduleId && activeLesson?.courseId
                 ? `/course/${activeLesson.courseId}/module/${activeLesson.moduleId}`
                 : '/'}
-              className="inline-flex items-center gap-2 text-sm font-semibold text-light-500 hover:text-light-900 transition-colors"
+              className="lg:hidden inline-flex items-center gap-2 text-sm font-semibold text-light-500 hover:text-light-900 transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
               Back to Module
             </Link>
-            <span className="text-xs font-bold text-accent-violet tracking-wider uppercase">Lesson {activeLesson.number}</span>
+            <span className="text-xs font-bold text-accent-violet tracking-wider uppercase ml-auto">Lesson {activeLesson.number}</span>
           </div>
 
           {/* Markdown Content */}
@@ -477,47 +765,11 @@ export default function LessonViewer() {
               </div>
             </div>
 
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                table({node, ...props}) {
-                  return (
-                    <div className="overflow-x-auto my-6 rounded-xl border border-light-200 shadow-sm">
-                      <table {...props} className="min-w-full text-sm" />
-                    </div>
-                  );
-                },
-                thead({node, ...props}) { return <thead {...props} className="bg-indigo-50 text-indigo-900" />; },
-                tbody({node, ...props}) { return <tbody {...props} className="divide-y divide-light-100" />; },
-                tr({node, ...props})    { return <tr {...props} className="even:bg-light-50/60 hover:bg-indigo-50/40 transition-colors" />; },
-                th({node, ...props})    { return <th {...props} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-indigo-700 whitespace-nowrap" />; },
-                td({node, ...props})    { return <td {...props} className="px-4 py-3 text-light-700 font-medium align-top" />; },
-                hr({node, ...props})    { return <hr {...props} className="my-1.5 border-light-200" />; },
-                code({node, inline, className, children, ...props}) {
-                  const match = /language-(\w+)/.exec(className || '');
-                  return !inline && match ? (
-                    <div className="rounded-xl overflow-hidden shadow-sm my-6 border border-light-200">
-                      <SyntaxHighlighter
-                        {...props}
-                        children={String(children).replace(/\n$/, '')}
-                        style={oneLight}
-                        language={match[1]}
-                        PreTag="div"
-                        customStyle={{ margin: 0, padding: '1.5rem', background: '#f8fafc', fontSize: '0.9rem' }}
-                      />
-                    </div>
-                  ) : (
-                    <code {...props} className={`${className} bg-light-100 text-accent-violet px-1.5 py-0.5 rounded-md text-sm font-mono`}>
-                      {children}
-                    </code>
-                  );
-                }
-              }}
-            >
-              {activeLesson.content}
-            </ReactMarkdown>
+            <MarkdownBlock>
+              {activeLesson.lessonMarkdown || activeLesson.content}
+            </MarkdownBlock>
 
-            {!showQuiz && (
+            {!showQuiz && hasChallengeContent && (
               <div className="mt-12 text-center">
                 <button
                   onClick={handleTakeChallenge}
@@ -548,19 +800,24 @@ export default function LessonViewer() {
           >
             <QuizPanel
               questions={questions}
+              questionsMarkdown={activeLesson.questionsMarkdown}
+              answersMarkdown={activeLesson.answersMarkdown}
               answers={answers}
               validationError={validationError}
               quizResult={quizResult}
               loading={loading}
               activeLesson={activeLesson}
+              showMarkdownAnswers={showMarkdownAnswers}
               onOptionChange={handleOptionChange}
               onTextChange={handleTextChange}
               onSubmit={handleQuizSubmit}
               onRetake={handleRetake}
+              onShowMarkdownAnswers={() => setShowMarkdownAnswers(true)}
             />
           </div>
         )}
-      </div>
+        </div>{/* end lesson+quiz inner flex */}
+      </div>{/* end main layout flex */}
     </div>
   );
 }

@@ -10,80 +10,133 @@ const Answer   = require('../models/Answer');
 const frontendData = require('../data/courseData.json');
 const backendData  = require('../data/courseData_backend.json');
 
-// ─── Normalise module id ───────────────────────────────────────────────────
-// Frontend JSON uses "id"; backend JSON uses "id" too but with prefix "backend_N"
-function getModuleId(mod) {
-  return mod.id || mod.moduleId;
+function asArray(data) {
+  return Array.isArray(data) ? data : [data];
+}
+
+function slugify(value, fallback) {
+  const source = String(value || fallback || '').trim().toLowerCase();
+  return source
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || String(fallback || 'item');
+}
+
+function getCourseId(courseData) {
+  return String(courseData.courseId || courseData.slug || slugify(courseData.title, 'course'));
+}
+
+function getModuleOrder(mod, index) {
+  return Number(mod.moduleNumber || mod.order || index + 1);
+}
+
+function getModuleId(mod, index) {
+  return String(mod.id || mod.moduleId || mod.slug || getModuleOrder(mod, index));
+}
+
+function getLessonNumber(lesson) {
+  return String(lesson.number || `${lesson.moduleNumber || 1}.${lesson.lessonNumber || 1}`);
+}
+
+function getLessonOrder(lesson, fallbackIndex) {
+  const lessonNumberPart = Number(getLessonNumber(lesson).split('.')[1]);
+  return Number(lesson.lessonNumber || lessonNumberPart || fallbackIndex + 1);
+}
+
+function getLessonId(lesson, courseId) {
+  return String(
+    lesson.id ||
+    lesson.lessonId ||
+    `${courseId}_${lesson.slug || `lesson-${getLessonNumber(lesson).replace('.', '-')}`}`
+  );
+}
+
+function getLessonModuleId(lesson, courseData) {
+  if (lesson.moduleId) return String(lesson.moduleId);
+
+  const moduleIndex = (courseData.modules || []).findIndex(mod =>
+    Number(mod.moduleNumber) === Number(lesson.moduleNumber)
+  );
+
+  if (moduleIndex >= 0) {
+    return getModuleId(courseData.modules[moduleIndex], moduleIndex);
+  }
+
+  return String(lesson.moduleNumber || 1);
 }
 
 async function seedCourse(courseData) {
-  const courseId = courseData.courseId;
-  const rawModules = courseData.modules;
-  const rawLessons = courseData.lessons;
+  const courseId = getCourseId(courseData);
+  const rawModules = courseData.modules || [];
+  const rawLessons = courseData.lessons || [];
 
   console.log(`\n[Seed] Processing: ${courseData.title}`);
 
-  // Build ordered list of lessons per module
   const lessonsByModule = {};
   for (const lesson of rawLessons) {
-    const mid = lesson.moduleId;
-    if (!lessonsByModule[mid]) lessonsByModule[mid] = [];
-    lessonsByModule[mid].push(lesson);
+    const moduleId = getLessonModuleId(lesson, courseData);
+    if (!lessonsByModule[moduleId]) lessonsByModule[moduleId] = [];
+    lessonsByModule[moduleId].push(lesson);
   }
 
-  // Sort each module's lessons by their "number" field (e.g. "1.1", "1.2")
-  for (const mid of Object.keys(lessonsByModule)) {
-    lessonsByModule[mid].sort((a, b) => {
-      const [, aN] = a.number.split('.').map(Number);
-      const [, bN] = b.number.split('.').map(Number);
-      return aN - bN;
-    });
+  for (const moduleId of Object.keys(lessonsByModule)) {
+    lessonsByModule[moduleId].sort((a, b) => getLessonOrder(a, 0) - getLessonOrder(b, 0));
   }
 
-  // ── Course document ──────────────────────────────────────────────────────
   const totalModules = rawModules.length;
   const totalLessons = rawLessons.length;
 
   await Course.findOneAndUpdate(
     { courseId },
-    { courseId, title: courseData.title, description: courseData.description, totalModules, totalLessons },
+    {
+      courseId,
+      slug: courseData.slug || '',
+      title: courseData.title,
+      description: courseData.description,
+      difficulty: courseData.difficulty || '',
+      estimatedDuration: courseData.estimatedDuration || '',
+      prerequisites: courseData.prerequisites || [],
+      learningObjectives: courseData.learningObjectives || [],
+      totalModules,
+      totalLessons,
+    },
     { upsert: true, new: true }
   );
-  console.log(`  ✓ Course upserted (${totalModules} modules, ${totalLessons} lessons)`);
+  console.log(`  Course upserted (${totalModules} modules, ${totalLessons} lessons)`);
 
-  // ── Module documents ─────────────────────────────────────────────────────
   for (let i = 0; i < rawModules.length; i++) {
     const mod = rawModules[i];
-    const moduleId = getModuleId(mod);
+    const moduleId = getModuleId(mod, i);
     const moduleLessons = lessonsByModule[moduleId] || [];
-    const lessonIds = moduleLessons.map(l => l.id);
+    const lessonIds = moduleLessons.map(lesson => getLessonId(lesson, courseId));
 
     await Module.findOneAndUpdate(
       { moduleId, courseId },
       {
         moduleId,
         courseId,
-        order: i + 1,
-        name: mod.name,
+        order: getModuleOrder(mod, i),
+        name: mod.name || mod.title,
+        slug: mod.slug || '',
         description: mod.description || '',
+        estimatedDuration: mod.estimatedDuration || '',
         lessonIds,
       },
       { upsert: true, new: true }
     );
   }
-  console.log(`  ✓ ${rawModules.length} modules upserted`);
+  console.log(`  ${rawModules.length} modules upserted`);
 
-  // ── Lesson, Question & Answer documents ─────────────────────────────────
   let lessonCount = 0;
   let questionCount = 0;
 
-  for (const mod of rawModules) {
-    const moduleId = getModuleId(mod);
+  for (let mi = 0; mi < rawModules.length; mi++) {
+    const mod = rawModules[mi];
+    const moduleId = getModuleId(mod, mi);
     const moduleLessons = lessonsByModule[moduleId] || [];
 
     for (let li = 0; li < moduleLessons.length; li++) {
       const lesson = moduleLessons[li];
-      const lessonId = lesson.id;
+      const lessonId = getLessonId(lesson, courseId);
 
       await Lesson.findOneAndUpdate(
         { lessonId },
@@ -91,21 +144,31 @@ async function seedCourse(courseData) {
           lessonId,
           moduleId,
           courseId,
-          number: lesson.number,
+          number: getLessonNumber(lesson),
           title: lesson.title,
-          objective: lesson.objective || '',
+          slug: lesson.slug || '',
+          objective: lesson.objective || lesson.description || '',
           difficulty: lesson.difficulty || 'Beginner',
-          frequency: lesson.frequency || 'High',
+          frequency: lesson.frequency || lesson.interviewFrequency || 'High',
+          estimatedDuration: lesson.estimatedDuration || '',
           thumbnailUrl: lesson.thumbnailUrl || '',
-          orderInModule: li + 1,
-          content: lesson.content || '',
+          orderInModule: getLessonOrder(lesson, li),
+          content: lesson.content || lesson.lessonMarkdown || '',
+          lessonMarkdown: lesson.lessonMarkdown || lesson.content || '',
+          questionsMarkdown: lesson.questionsMarkdown || '',
+          answersMarkdown: lesson.answersMarkdown || '',
         },
         { upsert: true, new: true }
       );
       lessonCount++;
 
-      // Questions & Answers
       const questions = lesson.questions || [];
+      if (questions.length === 0) {
+        await Question.deleteMany({ lessonId });
+        await Answer.deleteMany({ lessonId });
+        continue;
+      }
+
       for (let qi = 0; qi < questions.length; qi++) {
         const q = questions[qi];
 
@@ -140,8 +203,8 @@ async function seedCourse(courseData) {
     }
   }
 
-  console.log(`  ✓ ${lessonCount} lessons upserted`);
-  console.log(`  ✓ ${questionCount} questions + answers upserted`);
+  console.log(`  ${lessonCount} lessons upserted`);
+  console.log(`  ${questionCount} questions + answers upserted`);
 }
 
 async function main() {
@@ -149,10 +212,11 @@ async function main() {
   await mongoose.connect(process.env.MONGODB_URI, { dbName: 'interview_lms' });
   console.log('[Seed] Connected\n');
 
-  await seedCourse(frontendData);
-  await seedCourse(backendData);
+  for (const course of [...asArray(frontendData), ...asArray(backendData)]) {
+    await seedCourse(course);
+  }
 
-  console.log('\n[Seed] ✅ All done. Course data is live in MongoDB.');
+  console.log('\n[Seed] All done. Course data is live in MongoDB.');
   await mongoose.disconnect();
 }
 

@@ -23,3 +23,5 @@ yarn-error.log*
 # OS metadata
 .DS_Store
 Thumbs.db
+
+course_content_json_structure.md
